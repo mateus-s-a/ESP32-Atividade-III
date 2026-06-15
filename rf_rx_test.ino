@@ -39,7 +39,7 @@ size_t rxMessageLen = 0;
 /*
  * Função: checksum16
  * Objetivo: Calcula uma soma de verificação (checksum) simples de 16 bits sobre os dados recebidos.
- * Como funciona didaticamente: Ela soma todos os bytes do vetor. Se a soma ultrapassar 16 bits (estouro),
+ * Funcionamento: Ela soma todos os bytes do vetor. Se a soma ultrapassar 16 bits (estouro),
  * os bits extras (carregamento/carry) são somados de volta no final para garantir que o resultado
  * caiba em 16 bits. Por fim, retorna o complemento de um da soma. Serve para validar se houve erros.
  * Parâmetros:
@@ -61,7 +61,7 @@ uint16_t checksum16(const uint8_t* data, uint8_t len) {
 /*
  * Função: crc16_ccitt
  * Objetivo: Calcula o CRC16 (Cyclic Redundancy Check) utilizando o polinômio padrão CCITT (0x1021).
- * Como funciona didaticamente: O CRC é um método de detecção de erros robusto. Ele processa os dados bit a bit
+ * Funcionamento: O CRC é um método de detecção de erros robusto. Ele processa os dados bit a bit
  * simulando uma divisão polinomial binária. A cada bit, realiza operações de deslocamento de bits (shift)
  * e operações lógicas XOR baseadas no polinômio gerador. Usado para garantir a integridade dos dados recebidos.
  * Parâmetros:
@@ -84,7 +84,7 @@ uint16_t crc16_ccitt(const uint8_t* data, uint8_t len) {
 /*
  * Função: calcFCS
  * Objetivo: Calcula a FCS (Frame Check Sequence) do quadro para comparação.
- * Como funciona didaticamente: Dependendo da configuração da diretiva 'USE_CRC16' (que deve ser igual à do transmissor),
+ * Funcionamento: Dependendo da configuração da diretiva 'USE_CRC16' (que deve ser igual à do transmissor),
  * ela decide se o código de detecção de erros será calculado usando o algoritmo CRC16 ou o Checksum de 16 bits.
  * Parâmetros:
  *   - data: Ponteiro para o array de bytes.
@@ -98,7 +98,7 @@ uint16_t calcFCS(const uint8_t* data, uint8_t len) {
 /*
  * Função: typeToStr
  * Objetivo: Converte o código numérico do tipo de quadro em uma representação textual.
- * Como funciona didaticamente: Recebe o byte identificador do tipo do pacote e retorna uma string descritiva
+ * Funcionamento: Recebe o byte identificador do tipo do pacote e retorna uma string descritiva
  * ("DATA", "ACK", "END", "UNK"). Isso ajuda a mostrar informações formatadas e legíveis no Serial Monitor.
  * Parâmetros:
  *   - type: Byte representando o tipo do quadro.
@@ -116,7 +116,7 @@ const char* typeToStr(uint8_t type) {
 /*
  * Função: buildFrame
  * Objetivo: Constrói um quadro padrão (geralmente usado pelo receptor para gerar o quadro de confirmação ACK).
- * Como funciona didaticamente: Organiza a estrutura padrão do cabeçalho de rede (byte mágico, tipo, sequência, tamanho),
+ * Funcionamento: Organiza a estrutura padrão do cabeçalho de rede (byte mágico, tipo, sequência, tamanho),
  * copia os dados (se houver) e calcula os dois bytes de FCS ao final, guardando o resultado no buffer de saída.
  * Parâmetros:
  *   - type: Tipo do quadro (ex: TYPE_ACK).
@@ -146,7 +146,7 @@ uint8_t buildFrame(uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t le
 /*
  * Função: decodeFrame
  * Objetivo: Desempacota e valida a integridade de um quadro recebido.
- * Como funciona didaticamente: É um filtro de segurança. Ela checa se o quadro tem tamanho mínimo aceitável (6 bytes),
+ * Funcionamento: É um filtro de segurança. Ela checa se o quadro tem tamanho mínimo aceitável (6 bytes),
  * se inicia com o byte mágico correto, se o tamanho do payload informado é condizente e se o código de verificação
  * de erro (FCS) recebido bate com o FCS calculado no momento. Se tudo estiver correto, preenche a estrutura 'frame'.
  * Parâmetros:
@@ -180,7 +180,7 @@ ParseStatus decodeFrame(const uint8_t* raw, uint8_t rawLen, DecodedFrame& frame)
 /*
  * Função: sendAck
  * Objetivo: Envia um pacote de confirmação de recebimento (ACK) de volta ao transmissor.
- * Como funciona didaticamente: Após processar um quadro válido de dados, o receptor monta um quadro de ACK
+ * Funcionamento: Após processar um quadro válido de dados, o receptor monta um quadro de ACK
  * com o mesmo número de sequência do quadro recebido. Ele introduz um pequeno atraso (delay de 450ms) para 
  * dar tempo de a biblioteca de rádio do transmissor passar de transmissão para escuta, envia o ACK e aguarda a conclusão.
  * Parâmetros:
@@ -201,7 +201,7 @@ void sendAck(uint8_t seq) {
 /*
  * Função: clearAssemblyBuffer
  * Objetivo: Limpa o buffer acumulador de mensagens.
- * Como funciona didaticamente: Zera o tamanho acumulado da mensagem recebida (rxMessageLen = 0), preparando
+ * Funcionamento: Zera o tamanho acumulado da mensagem recebida (rxMessageLen = 0), preparando
  * o buffer para receber novos conjuntos de fragmentos.
  */
 void clearAssemblyBuffer() {
@@ -211,7 +211,7 @@ void clearAssemblyBuffer() {
 /*
  * Função: appendPayload
  * Objetivo: Acumula um fragmento de payload de dados recebido no buffer geral da mensagem.
- * Como funciona didaticamente: Como as mensagens grandes vêm fragmentadas em vários pacotes menores,
+ * Funcionamento: Como as mensagens grandes vêm fragmentadas em vários pacotes menores,
  * essa função anexa os novos dados recebidos ao final do acumulador temporário 'rxMessage'. Ela também
  * protege contra estouro de memória caso a mensagem seja maior que a capacidade do buffer.
  * Parâmetros:
@@ -232,7 +232,7 @@ void appendPayload(const uint8_t* data, uint8_t len) {
 /*
  * Função: onCompleteMessage
  * Objetivo: Processa e exibe a mensagem de texto completa quando todos os pedaços foram recebidos.
- * Como funciona didaticamente: É acionada após o recebimento do quadro especial de término (TYPE_END).
+ * Funcionamento: É acionada após o recebimento do quadro especial de término (TYPE_END).
  * Ela adiciona um caractere nulo ('\0') no final do buffer de bytes para que ele se comporte como uma String de C
  * válida e exibe a mensagem completa no Serial Monitor. Após isso, limpa o buffer para o próximo ciclo de recepção.
  */
@@ -253,7 +253,7 @@ void onCompleteMessage() {
 /*
  * Função: processValidFrame
  * Objetivo: Processa um quadro já decodificado e validado e executa a lógica do protocolo Stop-and-Wait.
- * Como funciona didaticamente: Analisa o tipo do quadro:
+ * Funcionamento: Analisa o tipo do quadro:
  *   - Se for DATA com a sequência esperada, anexa ao buffer, imprime o fragmento, envia o ACK correspondente
  *     e inverte a sequência esperada (0 vira 1, 1 vira 0). Se for DATA duplicado, apenas reenvia o ACK.
  *   - Se for END (fim da mensagem) com a sequência esperada, envia ACK, inverte a sequência esperada e 
@@ -304,7 +304,7 @@ void processValidFrame(const DecodedFrame& frame) {
 /*
  * Função: setup
  * Objetivo: Inicializa o hardware, a porta serial e a biblioteca de comunicação RF no receptor.
- * Como funciona didaticamente: É executada uma única vez quando o ESP32 inicia. Define a taxa da porta serial,
+ * Funcionamento: É executada uma única vez quando o ESP32 inicia. Define a taxa da porta serial,
  * inicializa o driver de RF (RH_ASK) e zera o buffer de montagem da mensagem.
  */
 void setup() {
@@ -325,7 +325,7 @@ void setup() {
 /*
  * Função: loop
  * Objetivo: Loop de execução contínua no receptor.
- * Como funciona didaticamente: Fica monitorando constantemente o driver de rádio para ver se algum pacote chegou.
+ * Funcionamento: Fica monitorando constantemente o driver de rádio para ver se algum pacote chegou.
  * Se um pacote bruto for recebido, a função decodifica-o e, caso não apresente problemas de integridade (FCS),
  * encaminha-o para a função que processa os quadros do protocolo de parada-e-espera.
  */
