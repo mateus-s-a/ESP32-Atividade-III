@@ -139,14 +139,16 @@ sequenceDiagram
 
 ---
 
-## Injeção e Simulação de Erros
+## Interação e Comandos via Serial Monitor
 
-Um critério de aceitação fundamental é provar a robustez do protocolo frente a ruídos induzidos. O código implementa um simulador dinâmico de erros controlado via Serial Monitor do Transmissor:
+O código do transmissor implementa um monitoramento ativo do Serial Monitor para a recepção de comandos digitados pelo usuário em tempo de execução:
 
+### 1. Injeção e Simulação de Erros
+Um critério de aceitação fundamental é provar a robustez do protocolo frente a ruídos induzidos. O código implementa um simulador dinâmico de erros controlado por comandos:
 *   **Comando `ERR ON`:** Ativa o injetor de erros.
 *   **Comando `ERR OFF`:** Desativa o injetor de erros.
 
-### Como a Injeção Funciona no Fluxo do Código:
+#### Como a Injeção Funciona no Fluxo do Código:
 Quando `injectErrors` está ativado, a lógica monitora a contagem de frames de dados enviados. **A cada 4 frames de dados (`dataFrameCounter % 4 == 0`), a primeira tentativa de envio do quadro é intencionalmente corrompida**.
 A corrupção altera o primeiro byte de dados úteis (`payload[4] ^= 0x5A`) depois de o FCS ter sido calculado de forma válida:
 
@@ -162,6 +164,11 @@ void maybeCorruptFirstAttempt(uint8_t* frame, uint8_t frameLen, bool shouldCorru
 ```
 
 O receptor detectará um FCS calculado diferente do recebido, descartará o quadro (`FRAME_BAD_FCS`), e o transmissor retransmitirá com sucesso na tentativa subsequente após o timeout.
+
+### 2. Controle do Contador Automático (Loop)
+Para permitir testes limpos de envio de texto personalizado através do Serial Monitor, o contador de envio periódico automático pode ser controlado em tempo real:
+*   **Comando `COUNT ON` ou `CNT ON`:** Ativa o envio periódico e automático do contador.
+*   **Comando `COUNT OFF` ou `CNT OFF`:** Desativa o envio periódico do contador, parando a transmissão automática para que o usuário interaja livremente com o terminal.
 
 ---
 
@@ -190,7 +197,7 @@ O receptor detectará um FCS calculado diferente do recebido, descartará o quad
 TX: iniciando protocolo confiável
 TX: pronto
 TX: digite um texto e pressione Enter para enviar
-TX: comandos disponiveis -> ERR ON / ERR OFF
+TX: comandos disponiveis -> ERR ON / ERR OFF / COUNT ON / COUNT OFF
 TX: iniciando envio confiável de: Hello World!
 TX: enviou DATA seq=0 len=12 tentativa=1
 TX: ACK confirmado para seq=0

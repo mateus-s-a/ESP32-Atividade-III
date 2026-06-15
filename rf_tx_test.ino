@@ -6,7 +6,6 @@
 #define RF_TX_PIN 25
 
 #define USE_CRC16 true          // true = CRC16-CCITT / false = checksum 16-bit
-#define AUTO_SEND_COUNTER true  // envia contador automaticamente se não houver texto no Serial
 
 const uint8_t FRAME_MAGIC = 0xA5;
 const uint8_t TYPE_DATA   = 0x01;
@@ -37,10 +36,22 @@ enum ParseStatus {
 
 uint8_t nextSeq = 0;
 bool injectErrors = false;
+bool autoSendCounter = true;  // envia contador automaticamente se não houver texto no Serial
 uint32_t dataFrameCounter = 0;
 int contador = 1;
 unsigned long lastAutoSend = 0;
 
+/*
+ * Função: checksum16
+ * Objetivo: Calcula uma soma de verificação (checksum) simples de 16 bits sobre um conjunto de dados.
+ * Como funciona didaticamente: Ela soma todos os bytes do vetor. Se a soma passar de 16 bits (estouro),
+ * os bits extras (carregamento/carry) são somados de volta no final para garantir que o resultado
+ * caiba em 16 bits. Por fim, retorna o complemento de um da soma.
+ * Parâmetros:
+ *   - data: Ponteiro para o array de bytes a ser verificado.
+ *   - len: Quantidade de bytes no array.
+ * Retorno: O valor do checksum calculado de 16 bits.
+ */
 uint16_t checksum16(const uint8_t* data, uint8_t len) {
   uint32_t sum = 0;
   for (uint8_t i = 0; i < len; i++) {
@@ -52,6 +63,17 @@ uint16_t checksum16(const uint8_t* data, uint8_t len) {
   return (uint16_t)(~sum);
 }
 
+/*
+ * Função: crc16_ccitt
+ * Objetivo: Calcula o CRC16 (Cyclic Redundancy Check) utilizando o polinômio padrão CCITT (0x1021).
+ * Como funciona didaticamente: O CRC é um método de detecção de erros muito mais robusto que o checksum simples.
+ * Ele processa os dados bit a bit como se estivesse realizando uma divisão polinomial binária. A cada bit,
+ * realiza operações de deslocamento de bits (shift) e lógica XOR baseadas no polinômio gerador.
+ * Parâmetros:
+ *   - data: Ponteiro para o array de bytes a ser verificado.
+ *   - len: Quantidade de bytes no array.
+ * Retorno: O código CRC de 16 bits calculado.
+ */
 uint16_t crc16_ccitt(const uint8_t* data, uint8_t len) {
   uint16_t crc = 0xFFFF;
   for (uint8_t i = 0; i < len; i++) {
@@ -64,10 +86,31 @@ uint16_t crc16_ccitt(const uint8_t* data, uint8_t len) {
   return crc;
 }
 
+/*
+ * Função: calcFCS
+ * Objetivo: Calcula a FCS (Frame Check Sequence / Sequência de Verificação de Quadro).
+ * Como funciona didaticamente: Essa função serve como um seletor. Dependendo da configuração da diretiva
+ * 'USE_CRC16', ela decide se o código de detecção de erros será calculado usando o algoritmo CRC16 (mais seguro)
+ * ou o Checksum de 16 bits (mais simples e rápido).
+ * Parâmetros:
+ *   - data: Ponteiro para o array de bytes.
+ *   - len: Quantidade de bytes.
+ * Retorno: O valor da verificação calculado em 16 bits.
+ */
 uint16_t calcFCS(const uint8_t* data, uint8_t len) {
   return USE_CRC16 ? crc16_ccitt(data, len) : checksum16(data, len);
 }
 
+/*
+ * Função: typeToStr
+ * Objetivo: Converte o código numérico do tipo de quadro em uma representação textual.
+ * Como funciona didaticamente: Recebe o identificador do tipo do pacote (como TYPE_DATA, TYPE_ACK) e 
+ * retorna uma string descritiva correspondente ("DATA", "ACK", "END", "UNK"). Isso facilita muito na
+ * impressão das mensagens de depuração no Serial Monitor.
+ * Parâmetros:
+ *   - type: Byte representando o tipo do quadro.
+ * Retorno: Uma string literal constante correspondente ao tipo.
+ */
 const char* typeToStr(uint8_t type) {
   switch (type) {
     case TYPE_DATA: return "DATA";
@@ -77,6 +120,24 @@ const char* typeToStr(uint8_t type) {
   }
 }
 
+/*
+ * Função: buildFrame
+ * Objetivo: Constrói (empacota) o quadro completo de transmissão RF com o cabeçalho e código de erro.
+ * Como funciona didaticamente: Ela monta a estrutura padrão do protocolo:
+ *   [0] Byte Mágico de início (FRAME_MAGIC)
+ *   [1] Tipo de Quadro (type)
+ *   [2] Número de Sequência (seq)
+ *   [3] Tamanho do Payload (len)
+ *   [4...] Os dados úteis em si (payload)
+ *   [FCS] Dois bytes de verificação de erros no final.
+ * Parâmetros:
+ *   - type: Tipo do quadro.
+ *   - seq: Número de sequência (0 ou 1).
+ *   - payload: Os dados úteis a serem enviados.
+ *   - len: Tamanho dos dados úteis.
+ *   - out: Vetor de destino onde o quadro montado será gravado.
+ * Retorno: Tamanho total do quadro gerado (em bytes).
+ */
 uint8_t buildFrame(uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t len, uint8_t* out) {
   out[0] = FRAME_MAGIC;
   out[1] = type;
@@ -94,6 +155,18 @@ uint8_t buildFrame(uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t le
   return len + 6;
 }
 
+/*
+ * Função: decodeFrame
+ * Objetivo: Desempacota e valida um quadro de dados recebido por RF.
+ * Como funciona didaticamente: Realiza testes de sanidade no pacote: checa tamanho mínimo, valida o byte mágico,
+ * verifica se o tamanho do payload é condizente, calcula o FCS dos dados recebidos e compara com o FCS que veio no quadro.
+ * Se o FCS for igual, os dados estão intactos e a estrutura DecodedFrame é preenchida.
+ * Parâmetros:
+ *   - raw: Vetor com os bytes brutos recebidos.
+ *   - rawLen: Tamanho do vetor bruto recebido.
+ *   - frame: Referência para a estrutura de dados onde o quadro decodificado será armazenado.
+ * Retorno: Status da decodificação (FRAME_OK, FRAME_BAD_FCS, etc.).
+ */
 ParseStatus decodeFrame(const uint8_t* raw, uint8_t rawLen, DecodedFrame& frame) {
   if (rawLen < 6) return FRAME_TOO_SHORT;
   if (raw[0] != FRAME_MAGIC) return FRAME_BAD_MAGIC;
@@ -116,6 +189,16 @@ ParseStatus decodeFrame(const uint8_t* raw, uint8_t rawLen, DecodedFrame& frame)
   return FRAME_OK;
 }
 
+/*
+ * Função: waitForAck
+ * Objetivo: Aguarda o recebimento do quadro de confirmação (ACK) para uma sequência específica.
+ * Como funciona didaticamente: Entra em loop por um tempo definido (ACK_TIMEOUT_MS). Fica lendo a recepção RF.
+ * Se decodificar um pacote válido do tipo ACK com o número de sequência correto, confirma o recebimento.
+ * Se receber um quadro corrompido ou de outra sequência, o programa reporta e continua aguardando até dar timeout.
+ * Parâmetros:
+ *   - wantedSeq: O número de sequência (0 ou 1) que o transmissor está esperando confirmação.
+ * Retorno: True se o ACK foi recebido com sucesso no prazo; False caso contrário (timeout).
+ */
 bool waitForAck(uint8_t wantedSeq) {
   unsigned long start = millis();
 
@@ -151,6 +234,16 @@ bool waitForAck(uint8_t wantedSeq) {
   return false;
 }
 
+/*
+ * Função: maybeCorruptFirstAttempt
+ * Objetivo: Introduz intencionalmente um erro de bit no quadro para simular ruídos no canal RF (apenas na 1ª tentativa).
+ * Como funciona didaticamente: É uma função de teste. Se a injeção de erros estiver ativa, ela altera um bit do payload
+ * ou do FCS (usando a operação XOR) simulando uma interferência real do ambiente na primeira tentativa de envio.
+ * Parâmetros:
+ *   - frame: Ponteiro para o buffer do quadro.
+ *   - frameLen: Tamanho do quadro em bytes.
+ *   - shouldCorrupt: Flag indicando se a simulação de corrupção deve ser executada.
+ */
 void maybeCorruptFirstAttempt(uint8_t* frame, uint8_t frameLen, bool shouldCorrupt) {
   if (!shouldCorrupt) return;
 
@@ -161,6 +254,18 @@ void maybeCorruptFirstAttempt(uint8_t* frame, uint8_t frameLen, bool shouldCorru
   }
 }
 
+/*
+ * Função: sendStopAndWaitFrame
+ * Objetivo: Envia um único quadro e gerencia retransmissões usando a técnica Stop-and-Wait.
+ * Como funciona didaticamente: Ela envia o pacote pelo transmissor de RF e espera pela confirmação (ACK).
+ * Se o ACK não chegar dentro do tempo limite, ela retransmite o mesmo quadro, fazendo isso até um máximo de MAX_RETRIES vezes.
+ * Também controla a simulação de erros nas transmissões de DATA.
+ * Parâmetros:
+ *   - type: Tipo do quadro a enviar (ex: DATA, END).
+ *   - payload: Ponteiro para os dados a serem transmitidos.
+ *   - len: Tamanho dos dados.
+ * Retorno: True se o quadro foi enviado e confirmado com sucesso; False se esgotaram as tentativas (falha).
+ */
 bool sendStopAndWaitFrame(uint8_t type, const uint8_t* payload, uint8_t len) {
   uint8_t pristine[64];
   uint8_t frameLen = buildFrame(type, nextSeq, payload, len, pristine);
@@ -199,6 +304,17 @@ bool sendStopAndWaitFrame(uint8_t type, const uint8_t* payload, uint8_t len) {
   return false;
 }
 
+/*
+ * Função: sendBufferReliable
+ * Objetivo: Transmite um bloco de dados grande de forma confiável, dividindo-o em vários quadros se necessário.
+ * Como funciona didaticamente: Como o transmissor possui um limite físico de tamanho por quadro (MAX_PAYLOAD),
+ * essa função fragmenta o bloco de dados original em vários blocos menores (chunks), envia cada um como um quadro
+ * de DATA (esperando confirmação para cada um) e, após enviar tudo, envia um quadro de fim (END) para concluir.
+ * Parâmetros:
+ *   - data: Ponteiro para o bloco de dados original.
+ *   - totalLen: Tamanho total do bloco de dados.
+ * Retorno: True se todos os pedaços e o fim foram transmitidos e confirmados; False se algum falhou.
+ */
 bool sendBufferReliable(const uint8_t* data, size_t totalLen) {
   size_t offset = 0;
 
@@ -219,6 +335,15 @@ bool sendBufferReliable(const uint8_t* data, size_t totalLen) {
   return true;
 }
 
+/*
+ * Função: sendTextMessage
+ * Objetivo: Envia uma string de texto de forma legível e estruturada.
+ * Como funciona didaticamente: Recebe uma String, exibe mensagens informativas na saída serial para fins
+ * de depuração e repassa os caracteres para a função 'sendBufferReliable'.
+ * Parâmetros:
+ *   - text: A mensagem de texto a ser enviada.
+ * Retorno: True se o envio completo foi bem-sucedido; False se falhou.
+ */
 bool sendTextMessage(const String& text) {
   Serial.print("TX: iniciando envio confiável de: ");
   Serial.println(text);
@@ -231,6 +356,14 @@ bool sendTextMessage(const String& text) {
   return ok;
 }
 
+/*
+ * Função: handleSerialCommands
+ * Objetivo: Monitora e processa os comandos digitados pelo usuário no Serial Monitor do Arduino IDE.
+ * Como funciona didaticamente: Fica checando se há dados no buffer serial do Arduino. Ao ler uma linha digitada,
+ * ela verifica se o comando corresponde a comandos especiais do sistema (para ligar/desligar a injeção de erro,
+ * ou ligar/desligar o envio automático do contador). Se não for um comando especial, ela envia a linha digitada
+ * como uma mensagem de texto de RF convencional.
+ */
 void handleSerialCommands() {
   if (!Serial.available()) return;
 
@@ -251,9 +384,28 @@ void handleSerialCommands() {
     return;
   }
 
+  if (line.equalsIgnoreCase("COUNT ON") || line.equalsIgnoreCase("CNT ON")) {
+    autoSendCounter = true;
+    Serial.println("TX: envio automatico do contador = ATIVADO");
+    return;
+  }
+
+  if (line.equalsIgnoreCase("COUNT OFF") || line.equalsIgnoreCase("CNT OFF")) {
+    autoSendCounter = false;
+    Serial.println("TX: envio automatico do contador = DESATIVADO");
+    return;
+  }
+
   sendTextMessage(line);
 }
 
+/*
+ * Função: setup
+ * Objetivo: Realiza as configurações e inicializações iniciais do hardware e software no microcontrolador.
+ * Como funciona didaticamente: É a primeira função a rodar no Arduino. Ela inicializa a comunicação Serial
+ * (115200 bps), inicia o driver de rádio frequência (RH_ASK) e exibe no Serial Monitor as informações de boas-vindas
+ * e comandos disponíveis.
+ */
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -267,13 +419,21 @@ void setup() {
 
   Serial.println("TX: pronto");
   Serial.println("TX: digite um texto e pressione Enter para enviar");
-  Serial.println("TX: comandos disponiveis -> ERR ON / ERR OFF");
+  Serial.println("TX: comandos disponiveis -> ERR ON / ERR OFF / COUNT ON / COUNT OFF");
 }
 
+/*
+ * Função: loop
+ * Objetivo: Loop de execução principal do programa, que roda continuamente após a inicialização.
+ * Como funciona didaticamente: Executa continuamente duas tarefas fundamentais:
+ *   1. Chama a função de leitura de comandos no Serial Monitor.
+ *   2. Caso o envio automático do contador esteja habilitado, verifica se passaram 3 segundos desde o
+ *      último envio automático para enviar o valor incrementado do contador e reiniciar o temporizador.
+ */
 void loop() {
   handleSerialCommands();
 
-  if (AUTO_SEND_COUNTER && millis() - lastAutoSend >= 3000) {
+  if (autoSendCounter && millis() - lastAutoSend >= 3000) {
     char msg[40];
     snprintf(msg, sizeof(msg), "contador=%d", contador++);
     sendTextMessage(String(msg));
