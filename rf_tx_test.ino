@@ -44,7 +44,7 @@ unsigned long lastAutoSend = 0;
 /*
  * Função: checksum16
  * Objetivo: Calcula uma soma de verificação (checksum) simples de 16 bits sobre um conjunto de dados.
- * Como funciona didaticamente: Ela soma todos os bytes do vetor. Se a soma passar de 16 bits (estouro),
+ * Funcionamento: Ela soma todos os bytes do vetor. Se a soma passar de 16 bits (estouro),
  * os bits extras (carregamento/carry) são somados de volta no final para garantir que o resultado
  * caiba em 16 bits. Por fim, retorna o complemento de um da soma.
  * Parâmetros:
@@ -66,7 +66,7 @@ uint16_t checksum16(const uint8_t* data, uint8_t len) {
 /*
  * Função: crc16_ccitt
  * Objetivo: Calcula o CRC16 (Cyclic Redundancy Check) utilizando o polinômio padrão CCITT (0x1021).
- * Como funciona didaticamente: O CRC é um método de detecção de erros muito mais robusto que o checksum simples.
+ * Funcionamento: O CRC é um método de detecção de erros muito mais robusto que o checksum simples.
  * Ele processa os dados bit a bit como se estivesse realizando uma divisão polinomial binária. A cada bit,
  * realiza operações de deslocamento de bits (shift) e lógica XOR baseadas no polinômio gerador.
  * Parâmetros:
@@ -89,7 +89,7 @@ uint16_t crc16_ccitt(const uint8_t* data, uint8_t len) {
 /*
  * Função: calcFCS
  * Objetivo: Calcula a FCS (Frame Check Sequence / Sequência de Verificação de Quadro).
- * Como funciona didaticamente: Essa função serve como um seletor. Dependendo da configuração da diretiva
+ * Funcionamento: Essa função serve como um seletor. Dependendo da configuração da diretiva
  * 'USE_CRC16', ela decide se o código de detecção de erros será calculado usando o algoritmo CRC16 (mais seguro)
  * ou o Checksum de 16 bits (mais simples e rápido).
  * Parâmetros:
@@ -104,7 +104,7 @@ uint16_t calcFCS(const uint8_t* data, uint8_t len) {
 /*
  * Função: typeToStr
  * Objetivo: Converte o código numérico do tipo de quadro em uma representação textual.
- * Como funciona didaticamente: Recebe o identificador do tipo do pacote (como TYPE_DATA, TYPE_ACK) e 
+ * Funcionamento: Recebe o identificador do tipo do pacote (como TYPE_DATA, TYPE_ACK) e 
  * retorna uma string descritiva correspondente ("DATA", "ACK", "END", "UNK"). Isso facilita muito na
  * impressão das mensagens de depuração no Serial Monitor.
  * Parâmetros:
@@ -123,7 +123,7 @@ const char* typeToStr(uint8_t type) {
 /*
  * Função: buildFrame
  * Objetivo: Constrói (empacota) o quadro completo de transmissão RF com o cabeçalho e código de erro.
- * Como funciona didaticamente: Ela monta a estrutura padrão do protocolo:
+ * Funcionamento: Ela monta a estrutura padrão do protocolo:
  *   [0] Byte Mágico de início (FRAME_MAGIC)
  *   [1] Tipo de Quadro (type)
  *   [2] Número de Sequência (seq)
@@ -158,7 +158,7 @@ uint8_t buildFrame(uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t le
 /*
  * Função: decodeFrame
  * Objetivo: Desempacota e valida um quadro de dados recebido por RF.
- * Como funciona didaticamente: Realiza testes de sanidade no pacote: checa tamanho mínimo, valida o byte mágico,
+ * Funcionamento: Realiza testes de sanidade no pacote: checa tamanho mínimo, valida o byte mágico,
  * verifica se o tamanho do payload é condizente, calcula o FCS dos dados recebidos e compara com o FCS que veio no quadro.
  * Se o FCS for igual, os dados estão intactos e a estrutura DecodedFrame é preenchida.
  * Parâmetros:
@@ -192,7 +192,7 @@ ParseStatus decodeFrame(const uint8_t* raw, uint8_t rawLen, DecodedFrame& frame)
 /*
  * Função: waitForAck
  * Objetivo: Aguarda o recebimento do quadro de confirmação (ACK) para uma sequência específica.
- * Como funciona didaticamente: Entra em loop por um tempo definido (ACK_TIMEOUT_MS). Fica lendo a recepção RF.
+ * Funcionamento: Entra em loop por um tempo definido (ACK_TIMEOUT_MS). Fica lendo a recepção RF.
  * Se decodificar um pacote válido do tipo ACK com o número de sequência correto, confirma o recebimento.
  * Se receber um quadro corrompido ou de outra sequência, o programa reporta e continua aguardando até dar timeout.
  * Parâmetros:
@@ -237,7 +237,7 @@ bool waitForAck(uint8_t wantedSeq) {
 /*
  * Função: maybeCorruptFirstAttempt
  * Objetivo: Introduz intencionalmente um erro de bit no quadro para simular ruídos no canal RF (apenas na 1ª tentativa).
- * Como funciona didaticamente: É uma função de teste. Se a injeção de erros estiver ativa, ela altera um bit do payload
+ * Funcionamento: É uma função de teste. Se a injeção de erros estiver ativa, ela altera um bit do payload
  * ou do FCS (usando a operação XOR) simulando uma interferência real do ambiente na primeira tentativa de envio.
  * Parâmetros:
  *   - frame: Ponteiro para o buffer do quadro.
@@ -257,7 +257,7 @@ void maybeCorruptFirstAttempt(uint8_t* frame, uint8_t frameLen, bool shouldCorru
 /*
  * Função: sendStopAndWaitFrame
  * Objetivo: Envia um único quadro e gerencia retransmissões usando a técnica Stop-and-Wait.
- * Como funciona didaticamente: Ela envia o pacote pelo transmissor de RF e espera pela confirmação (ACK).
+ * Funcionamento: Ela envia o pacote pelo transmissor de RF e espera pela confirmação (ACK).
  * Se o ACK não chegar dentro do tempo limite, ela retransmite o mesmo quadro, fazendo isso até um máximo de MAX_RETRIES vezes.
  * Também controla a simulação de erros nas transmissões de DATA.
  * Parâmetros:
@@ -307,7 +307,7 @@ bool sendStopAndWaitFrame(uint8_t type, const uint8_t* payload, uint8_t len) {
 /*
  * Função: sendBufferReliable
  * Objetivo: Transmite um bloco de dados grande de forma confiável, dividindo-o em vários quadros se necessário.
- * Como funciona didaticamente: Como o transmissor possui um limite físico de tamanho por quadro (MAX_PAYLOAD),
+ * Funcionamento: Como o transmissor possui um limite físico de tamanho por quadro (MAX_PAYLOAD),
  * essa função fragmenta o bloco de dados original em vários blocos menores (chunks), envia cada um como um quadro
  * de DATA (esperando confirmação para cada um) e, após enviar tudo, envia um quadro de fim (END) para concluir.
  * Parâmetros:
@@ -338,7 +338,7 @@ bool sendBufferReliable(const uint8_t* data, size_t totalLen) {
 /*
  * Função: sendTextMessage
  * Objetivo: Envia uma string de texto de forma legível e estruturada.
- * Como funciona didaticamente: Recebe uma String, exibe mensagens informativas na saída serial para fins
+ * Funcionamento: Recebe uma String, exibe mensagens informativas na saída serial para fins
  * de depuração e repassa os caracteres para a função 'sendBufferReliable'.
  * Parâmetros:
  *   - text: A mensagem de texto a ser enviada.
@@ -359,7 +359,7 @@ bool sendTextMessage(const String& text) {
 /*
  * Função: handleSerialCommands
  * Objetivo: Monitora e processa os comandos digitados pelo usuário no Serial Monitor do Arduino IDE.
- * Como funciona didaticamente: Fica checando se há dados no buffer serial do Arduino. Ao ler uma linha digitada,
+ * Funcionamento: Fica checando se há dados no buffer serial do Arduino. Ao ler uma linha digitada,
  * ela verifica se o comando corresponde a comandos especiais do sistema (para ligar/desligar a injeção de erro,
  * ou ligar/desligar o envio automático do contador). Se não for um comando especial, ela envia a linha digitada
  * como uma mensagem de texto de RF convencional.
@@ -402,7 +402,7 @@ void handleSerialCommands() {
 /*
  * Função: setup
  * Objetivo: Realiza as configurações e inicializações iniciais do hardware e software no microcontrolador.
- * Como funciona didaticamente: É a primeira função a rodar no Arduino. Ela inicializa a comunicação Serial
+ * Funcionamento: É a primeira função a rodar no Arduino. Ela inicializa a comunicação Serial
  * (115200 bps), inicia o driver de rádio frequência (RH_ASK) e exibe no Serial Monitor as informações de boas-vindas
  * e comandos disponíveis.
  */
@@ -425,7 +425,7 @@ void setup() {
 /*
  * Função: loop
  * Objetivo: Loop de execução principal do programa, que roda continuamente após a inicialização.
- * Como funciona didaticamente: Executa continuamente duas tarefas fundamentais:
+ * Funcionamento: Executa continuamente duas tarefas fundamentais:
  *   1. Chama a função de leitura de comandos no Serial Monitor.
  *   2. Caso o envio automático do contador esteja habilitado, verifica se passaram 3 segundos desde o
  *      último envio automático para enviar o valor incrementado do contador e reiniciar o temporizador.
