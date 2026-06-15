@@ -22,9 +22,12 @@ Para facilitar a leitura e organização do projeto, a documentação detalhada 
 3.  **[Detecção de Erros e Assinaturas (FCS)](docs/fcs.md)**
     *   Comparativo técnico entre as assinaturas digitais do **Checksum de 16 bits** e do **CRC-16-CCITT**.
     *   Implementações em C++ e instruções para alternar entre os modos de validação.
-4.  **[Guia de Uso, Comandos e Logs](docs/guia_uso.md)**
+4.  **[Como o Projeto Funciona (Guia Didático)](docs/funcionamento.md)**
+    *   Explicação didática do ciclo de vida da mensagem ("Hello World") com analogias ilustradas.
+    *   Diagrama de sequência visual do fluxo de envio e confirmação.
+5.  **[Guia de Uso, Comandos e Logs](docs/guia_uso.md)**
     *   Passo a passo para configurar a Arduino IDE, instalar bibliotecas e gravar os microcontroladores.
     *   Tabela de comandos do Serial Monitor (`ERR ON/OFF`, `COUNT ON/OFF`).
     *   Logs demonstrativos da simulação de ruídos e envio de texto limpo.
-5.  **[Requisitos Originais do Projeto (Enunciado)](docs/Projeto%20Final%20-%20Comunica%C3%A7%C3%A3o%20via%20R%C3%A1dio.md)**
+6.  **[Requisitos Originais do Projeto (Enunciado)](docs/Projeto%20Final%20-%20Comunica%C3%A7%C3%A3o%20via%20R%C3%A1dio.md)**
     *   Regras, critérios de pontuação e prazos estipulados pelo docente.
