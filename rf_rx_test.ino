@@ -3,8 +3,8 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
-// Instanciação do LCD 16x2 no endereço I2C 0x27
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+// Instanciação do LCD 20x4 no endereço I2C 0x27
+LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 #define RF_BITRATE 500
 #define RF_RX_PIN 26
@@ -238,9 +238,9 @@ void writePayloadAtOffset(const uint8_t* data, uint8_t len, uint16_t offset) {
 
 /*
  * Função: showTextOnLcd
- * Objetivo: Exibe o texto recebido de forma formatada nas duas linhas do display LCD 16x2.
- * Funcionamento: Limpa o visor, posiciona o cursor e escreve os primeiros 16 caracteres
- * na primeira linha. Se o texto exceder 16 caracteres, quebra a mensagem para a segunda linha.
+ * Objetivo: Exibe o texto recebido de forma formatada nas quatro linhas do display LCD 20x4.
+ * Funcionamento: Limpa o visor, posiciona o cursor e escreve os caracteres respeitando
+ * o limite de 20 caracteres por linha, quebrando o texto automaticamente para as linhas seguintes.
  * Parâmetros:
  *   - text: Ponteiro para a string de texto a ser exibida.
  */
@@ -249,16 +249,32 @@ void showTextOnLcd(const char* text) {
   
   size_t len = strlen(text);
   
-  // Primeira linha (caracteres 0 a 15)
+  // Linha 0 (caracteres 0 a 19)
   lcd.setCursor(0, 0);
-  for (size_t i = 0; i < len && i < 16; i++) {
+  for (size_t i = 0; i < len && i < 20; i++) {
     lcd.write(text[i]);
   }
   
-  // Segunda linha (caracteres 16 a 31)
-  if (len > 16) {
+  // Linha 1 (caracteres 20 a 39)
+  if (len > 20) {
     lcd.setCursor(0, 1);
-    for (size_t i = 16; i < len && i < 32; i++) {
+    for (size_t i = 20; i < len && i < 40; i++) {
+      lcd.write(text[i]);
+    }
+  }
+
+  // Linha 2 (caracteres 40 a 59)
+  if (len > 40) {
+    lcd.setCursor(0, 2);
+    for (size_t i = 40; i < len && i < 60; i++) {
+      lcd.write(text[i]);
+    }
+  }
+
+  // Linha 3 (caracteres 60 a 79)
+  if (len > 60) {
+    lcd.setCursor(0, 3);
+    for (size_t i = 60; i < len && i < 80; i++) {
       lcd.write(text[i]);
     }
   }
@@ -384,14 +400,15 @@ void setup() {
 
   Serial.println("RX: iniciando protocolo confiável");
 
-  // Inicialização do display LCD I2C
+  // Configura os pinos I2C e inicializa o LCD
+  Wire.begin(21, 22);
   lcd.init();
   lcd.backlight();
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("RX pronto");
   lcd.setCursor(0, 1);
-  lcd.print("Aguardando...");
+  lcd.print("Aguardando mensagem...");
 
   if (!driver.init()) {
     Serial.println("RX: falha ao iniciar RH_ASK");
