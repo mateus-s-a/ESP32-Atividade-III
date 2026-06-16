@@ -74,14 +74,3 @@ sequenceDiagram
 *   **Verificação de Conclusão no `TYPE_END`:** Quando o transmissor envia o quadro `TYPE_END` com `seq = N` (total de fragmentos), o receptor verifica se todos os blocos de `0` a `N-1` constam como recebidos.
     *   **Se sim:** Retorna o `ACK(N)` para confirmar o término da sessão e reconstrói a mensagem para exibição na porta serial e tela LCD.
     *   **Se não:** Ignora o quadro `END` temporariamente, permitindo que o transmissor dê timeout e retransmita apenas os pacotes de dados que faltaram.
-
----
-
-### Payloads Especiais (Suporte a Imagens)
-
-Para permitir que o receptor diferencie mensagens de texto comum de transmissões de imagem sem alterar o cabeçalho físico ou a lógica do protocolo de enlace, o payload encapsula prefixos e metadados de aplicação específicos:
-
-1. **ASCII Art (`[IMG:ASCII]`)**: Prefixo de 11 bytes. Indica que os 80 bytes seguintes contêm a matriz de caracteres de uma imagem de texto $20 \times 4$ para exibição direta e sem quebras no LCD 20x4.
-2. **Custom Glyph (`[IMG:GLYPH]`)**: Prefixo de 11 bytes. O 12º byte indica o slot da memória RAM do LCD (de `0` a `7`) onde o ícone será registrado. Os 8 bytes seguintes carregam os dados bitmap ($5 \times 8$ pixels) da imagem gerada.
-3. **Imagem Binária Real (`[IMG:BIN]`)**: Prefixo de 9 bytes. Sinaliza que os bytes restantes correspondem aos bytes binários compactados de uma imagem real (por exemplo, um arquivo `.bmp` ou `.png`). Ao finalizar, o receptor converte essa sequência de volta para a representação hexadecimal (`[IMG:HEX]...`) para exibição no Serial Monitor do PC.
-

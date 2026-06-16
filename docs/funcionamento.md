@@ -132,30 +132,3 @@ sequenceDiagram
     Canal->>TX: Entrega ACK (Seq=1)
     Note over TX: Transmissão finalizada com sucesso!
 ```
-
----
-
-## 5. Ciclo de Vida da Transmissão de Imagens
-
-O protocolo suporta a transmissão de imagens de forma transparente e flexível:
-
-### A. Imagens em ASCII Art
-1. O usuário envia `IMG HEART` no console serial do transmissor.
-2. O transmissor gera um array contendo o prefixo `[IMG:ASCII]` e o desenho em texto ($20 \times 4$ caracteres).
-3. O bloco é fragmentado em 4 quadros `DATA` e transmitido.
-4. O receptor exibe no LCD o progresso dinâmico de blocos recebidos (ex: `Blocos: 1`, `Blocos: 2`, ...).
-5. Ao receber o quadro `END` e verificar que todas as partes estão completas, o receptor chama a função `renderAsciiArt()`, que posiciona o cursor linha por linha, redesenhando o coração no display LCD 20x4 sem a quebra automática de caracteres.
-
-### B. Caracteres Customizados (Custom Glyphs)
-1. O usuário envia `IMG GLYPH` no transmissor.
-2. O transmissor gera um pacote com o prefixo `[IMG:GLYPH]`, define o slot RAM `0` do display e envia os 8 bytes da matriz de pixels de 5x8 (formando a imagem de um Pacman).
-3. O receptor extrai esses 8 bytes e chama a função nativa `lcd.createChar(0, pattern)` que define o caractere customizado físico número 0 no circuito do display.
-4. O LCD exibe o texto confirmando o registro e renderiza o caractere customizado na tela usando `lcd.write(0)`.
-
-### C. Imagem Real em Hexadecimal (Binário)
-1. O usuário converte uma imagem real do PC em string hexadecimal (ex: `"424D360000..."`).
-2. O usuário envia `[IMG:HEX]424D360000...` no transmissor.
-3. O transmissor lê o prefixo, converte a string hexadecimal de volta para bytes binários puros (economizando 50% de banda de rádio) e monta o buffer binário com a cabeçalho `[IMG:BIN]`.
-4. O transmissor envia os bytes usando a janela deslizante do Selective Repeat. O receptor exibe o progresso de blocos na tela LCD.
-5. No final da recepção, o receptor reverte os bytes binários de volta para formato de texto hexadecimal, imprime a string reconstruída `[IMG:HEX]...` na tela serial para que o usuário possa copiar e salvar como arquivo original de imagem no PC, e atualiza o LCD confirmando o tamanho recebido.
-

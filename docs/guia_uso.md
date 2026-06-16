@@ -35,13 +35,6 @@ O código do transmissor implementa monitoramento ativo do Serial Monitor para c
 *   **Comando `COUNT ON` (ou `CNT ON`):** Ativa o envio periódico e automático do contador a cada 3 segundos.
 *   **Comando `COUNT OFF` (ou `CNT OFF`):** Desativa o envio periódico do contador, permitindo o monitoramento limpo apenas de mensagens enviadas manualmente pelo usuário.
 
-### C. Modo de Envio de Imagens
-O sistema suporta três modos de demonstração de envio e reconstrução de imagem:
-*   **Comando `IMG HEART`:** Transmite uma imagem em ASCII Art de um coração ($20 \times 4$ caracteres). O receptor reconstrói e renderiza a imagem diretamente nas quatro linhas do display LCD.
-*   **Comando `IMG SMILEY`:** Transmite uma imagem em ASCII Art de uma face feliz ($20 \times 4$ caracteres).
-*   **Comando `IMG GLYPH`:** Envia a matriz de bits ($5 \times 8$ pixels) de um ícone customizado (Pacman) via rádio. O receptor cria o caractere dinamicamente na memória RAM do LCD (`lcd.createChar(0, pattern)`) e o exibe no visor.
-*   **Comando `[IMG:HEX]<dados_hex>`**: Permite enviar um arquivo de imagem real convertido para formato hexadecimal (ex: `[IMG:HEX]424D360000...`). O transmissor compacta os dados para binário e transmite via Selective Repeat. O receptor exibe o progresso de blocos na tela LCD e, ao completar a recepção sem erros, imprime a string HEX reconstruída no Monitor Serial, possibilitando salvar o arquivo original no PC.
-
 ---
 
 ## 5. Logs de Execução Demonstrativos
