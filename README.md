@@ -2,7 +2,7 @@
 
 Este repositório contém a implementação do projeto final para a disciplina de **Transmissão e Comunicação de Dados** do Instituto Federal de Educação, Ciência e Tecnologia de Mato Grosso (IFMT).
 
-O objetivo do projeto é estabelecer uma comunicação sem fio confiável e resiliente entre duas placas ESP32 utilizando módulos de radiofrequência (RF) de 433 MHz em nível de enlace de dados, aplicando conceitos teóricos de **estruturação de quadros**, **detecção de erros (FCS)** e **controle de fluxo/erro (Stop-and-Wait ARQ)**.
+O objetivo do projeto é estabelecer uma comunicação sem fio confiável e resiliente entre duas placas ESP32 utilizando módulos de radiofrequência (RF) de 433 MHz em nível de enlace de dados, aplicando conceitos teóricos de **estruturação de quadros**, **detecção de erros (FCS)** e **controle de fluxo/erro (Selective Repeat ARQ)**.
 
 - **Mateus de Souza Arruda**
 - **Matheus Henrique Moreira Louro**
@@ -18,7 +18,7 @@ Para facilitar a leitura e organização do projeto, a documentação detalhada 
     *   Recomendações técnicas para melhoria de sinal e confecção de antenas.
 2.  **[Estrutura do Quadro e Protocolo de Enlace](docs/protocolo.md)**
     *   Layout de bytes do frame (Magic Byte, Type, Seq, Len, Payload, FCS).
-    *   Detalhamento do algoritmo **Stop-and-Wait ARQ** e diagramas de transição de estado.
+    *   Detalhamento do algoritmo **Selective Repeat ARQ** e diagramas de transição de estado.
 3.  **[Detecção de Erros e Assinaturas (FCS)](docs/fcs.md)**
     *   Comparativo técnico entre as assinaturas digitais do **Checksum de 16 bits** e do **CRC-16-CCITT**.
     *   Implementações em C++ e instruções para alternar entre os modos de validação.
