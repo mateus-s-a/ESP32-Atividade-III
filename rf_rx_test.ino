@@ -42,6 +42,7 @@ size_t rxMessageLen = 0;
 bool chunkReceived[256] = {false};
 uint8_t chunkLengths[256] = {0};
 uint8_t totalChunks = 0;
+unsigned long lastPacketTime = 0;
 
 /*
  * Função: checksum16
@@ -314,6 +315,10 @@ void onCompleteMessage() {
  *   - frame: Estrutura contendo o quadro decodificado de forma amigável.
  */
 void processValidFrame(const DecodedFrame& frame) {
+  if (frame.type == TYPE_DATA || frame.type == TYPE_END) {
+    lastPacketTime = millis();
+  }
+
   if (frame.type == TYPE_DATA) {
     uint8_t seq = frame.seq;
 
@@ -427,6 +432,27 @@ void setup() {
  * Objetivo: Loop de execução contínua no receptor.
  */
 void loop() {
+  // Verifica se há alguma mensagem em andamento e limpa por inatividade (timeout de 4 segundos)
+  bool active = false;
+  for (int i = 0; i < 256; i++) {
+    if (chunkReceived[i]) {
+      active = true;
+      break;
+    }
+  }
+
+  if (active && (millis() - lastPacketTime > 4000)) {
+    Serial.println("RX: tempo limite de inatividade atingido (4s), limpando buffer de montagem");
+    clearAssemblyBuffer();
+    
+    // Restaura as mensagens iniciais do LCD
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("RX pronto");
+    lcd.setCursor(0, 1);
+    lcd.print("Aguardando mensagem...");
+  }
+
   uint8_t raw[64];
   uint8_t rawLen = sizeof(raw);
 
