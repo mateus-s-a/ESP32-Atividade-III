@@ -1,7 +1,7 @@
+#include <LiquidCrystal_I2C.h>
 #include <RH_ASK.h>
 #include <SPI.h>
 #include <Wire.h>
-#include <LiquidCrystal_I2C.h>
 
 // Instanciação do LCD 20x4 no endereço I2C 0x27
 LiquidCrystal_I2C lcd(0x27, 20, 4);
@@ -10,12 +10,12 @@ LiquidCrystal_I2C lcd(0x27, 20, 4);
 #define RF_RX_PIN 26
 #define RF_TX_PIN 25
 
-#define USE_CRC16 true   // tem que bater com o TX
+#define USE_CRC16 true // tem que bater com o TX
 
 const uint8_t FRAME_MAGIC = 0xA5;
-const uint8_t TYPE_DATA   = 0x01;
-const uint8_t TYPE_ACK    = 0x02;
-const uint8_t TYPE_END    = 0x03;
+const uint8_t TYPE_DATA = 0x01;
+const uint8_t TYPE_ACK = 0x02;
+const uint8_t TYPE_END = 0x03;
 
 const uint8_t MAX_PAYLOAD = 24;
 const size_t RX_MESSAGE_BUFFER_SIZE = 512;
@@ -46,16 +46,17 @@ unsigned long lastPacketTime = 0;
 
 /*
  * Função: checksum16
- * Objetivo: Calcula uma soma de verificação (checksum) simples de 16 bits sobre os dados recebidos.
- * Funcionamento: Ela soma todos os bytes do vetor. Se a soma ultrapassar 16 bits (estouro),
- * os bits extras (carregamento/carry) são somados de volta no final para garantir que o resultado
- * caiba em 16 bits. Por fim, retorna o complemento de um da soma. Serve para validar se houve erros.
+ * Objetivo: Calcula uma soma de verificação (checksum) simples de 16 bits sobre
+ * os dados recebidos. Funcionamento: Ela soma todos os bytes do vetor. Se a
+ * soma ultrapassar 16 bits (estouro), os bits extras (carregamento/carry) são
+ * somados de volta no final para garantir que o resultado caiba em 16 bits. Por
+ * fim, retorna o complemento de um da soma. Serve para validar se houve erros.
  * Parâmetros:
  *   - data: Ponteiro para o array de bytes a ser verificado.
  *   - len: Quantidade de bytes no array.
  * Retorno: O valor do checksum calculado de 16 bits.
  */
-uint16_t checksum16(const uint8_t* data, uint8_t len) {
+uint16_t checksum16(const uint8_t *data, uint8_t len) {
   uint32_t sum = 0;
   for (uint8_t i = 0; i < len; i++) {
     sum += data[i];
@@ -68,22 +69,25 @@ uint16_t checksum16(const uint8_t* data, uint8_t len) {
 
 /*
  * Função: crc16_ccitt
- * Objetivo: Calcula o CRC16 (Cyclic Redundancy Check) utilizando o polinômio padrão CCITT (0x1021).
- * Funcionamento: O CRC é um método de detecção de erros robusto. Ele processa os dados bit a bit
- * simulando uma divisão polinomial binária. A cada bit, realiza operações de deslocamento de bits (shift)
- * e operações lógicas XOR baseadas no polinômio gerador. Usado para garantir a integridade dos dados recebidos.
- * Parâmetros:
+ * Objetivo: Calcula o CRC16 (Cyclic Redundancy Check) utilizando o polinômio
+ * padrão CCITT (0x1021). Funcionamento: O CRC é um método de detecção de erros
+ * robusto. Ele processa os dados bit a bit simulando uma divisão polinomial
+ * binária. A cada bit, realiza operações de deslocamento de bits (shift) e
+ * operações lógicas XOR baseadas no polinômio gerador. Usado para garantir a
+ * integridade dos dados recebidos. Parâmetros:
  *   - data: Ponteiro para o array de bytes a ser verificado.
  *   - len: Quantidade de bytes no array.
  * Retorno: O código CRC de 16 bits calculado.
  */
-uint16_t crc16_ccitt(const uint8_t* data, uint8_t len) {
+uint16_t crc16_ccitt(const uint8_t *data, uint8_t len) {
   uint16_t crc = 0xFFFF;
   for (uint8_t i = 0; i < len; i++) {
     crc ^= (uint16_t)data[i] << 8;
     for (uint8_t b = 0; b < 8; b++) {
-      if (crc & 0x8000) crc = (crc << 1) ^ 0x1021;
-      else              crc <<= 1;
+      if (crc & 0x8000)
+        crc = (crc << 1) ^ 0x1021;
+      else
+        crc <<= 1;
     }
   }
   return crc;
@@ -92,41 +96,47 @@ uint16_t crc16_ccitt(const uint8_t* data, uint8_t len) {
 /*
  * Função: calcFCS
  * Objetivo: Calcula a FCS (Frame Check Sequence) do quadro para comparação.
- * Funcionamento: Dependendo da configuração da diretiva 'USE_CRC16' (que deve ser igual à do transmissor),
- * ela decide se o código de detecção de erros será calculado usando o algoritmo CRC16 ou o Checksum de 16 bits.
- * Parâmetros:
+ * Funcionamento: Dependendo da configuração da diretiva 'USE_CRC16' (que deve
+ * ser igual à do transmissor), ela decide se o código de detecção de erros será
+ * calculado usando o algoritmo CRC16 ou o Checksum de 16 bits. Parâmetros:
  *   - data: Ponteiro para o array de bytes.
  *   - len: Quantidade de bytes.
  * Retorno: O valor da verificação calculado em 16 bits.
  */
-uint16_t calcFCS(const uint8_t* data, uint8_t len) {
+uint16_t calcFCS(const uint8_t *data, uint8_t len) {
   return USE_CRC16 ? crc16_ccitt(data, len) : checksum16(data, len);
 }
 
 /*
  * Função: typeToStr
- * Objetivo: Converte o código numérico do tipo de quadro em uma representação textual.
- * Funcionamento: Recebe o byte identificador do tipo do pacote e retorna uma string descritiva
- * ("DATA", "ACK", "END", "UNK"). Isso ajuda a mostrar informações formatadas e legíveis no Serial Monitor.
- * Parâmetros:
+ * Objetivo: Converte o código numérico do tipo de quadro em uma representação
+ * textual. Funcionamento: Recebe o byte identificador do tipo do pacote e
+ * retorna uma string descritiva
+ * ("DATA", "ACK", "END", "UNK"). Isso ajuda a mostrar informações formatadas e
+ * legíveis no Serial Monitor. Parâmetros:
  *   - type: Byte representando o tipo do quadro.
  * Retorno: Uma string literal constante correspondente ao tipo.
  */
-const char* typeToStr(uint8_t type) {
+const char *typeToStr(uint8_t type) {
   switch (type) {
-    case TYPE_DATA: return "DATA";
-    case TYPE_ACK:  return "ACK";
-    case TYPE_END:  return "END";
-    default:        return "UNK";
+  case TYPE_DATA:
+    return "DATA";
+  case TYPE_ACK:
+    return "ACK";
+  case TYPE_END:
+    return "END";
+  default:
+    return "UNK";
   }
 }
 
 /*
  * Função: buildFrame
- * Objetivo: Constrói um quadro padrão (geralmente usado pelo receptor para gerar o quadro de confirmação ACK).
- * Funcionamento: Organiza a estrutura padrão do cabeçalho de rede (byte mágico, tipo, sequência, tamanho),
- * copia os dados (se houver) e calcula os dois bytes de FCS ao final, guardando o resultado no buffer de saída.
- * Parâmetros:
+ * Objetivo: Constrói um quadro padrão (geralmente usado pelo receptor para
+ * gerar o quadro de confirmação ACK). Funcionamento: Organiza a estrutura
+ * padrão do cabeçalho de rede (byte mágico, tipo, sequência, tamanho), copia os
+ * dados (se houver) e calcula os dois bytes de FCS ao final, guardando o
+ * resultado no buffer de saída. Parâmetros:
  *   - type: Tipo do quadro (ex: TYPE_ACK).
  *   - seq: Número de sequência correspondente.
  *   - payload: Dados adicionais (usualmente nulo para o ACK).
@@ -134,7 +144,8 @@ const char* typeToStr(uint8_t type) {
  *   - out: Buffer onde o quadro finalizado será gerado.
  * Retorno: Tamanho total do quadro construído.
  */
-uint8_t buildFrame(uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t len, uint8_t* out) {
+uint8_t buildFrame(uint8_t type, uint8_t seq, const uint8_t *payload,
+                   uint8_t len, uint8_t *out) {
   out[0] = FRAME_MAGIC;
   out[1] = type;
   out[2] = seq;
@@ -154,30 +165,37 @@ uint8_t buildFrame(uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t le
 /*
  * Função: decodeFrame
  * Objetivo: Desempacota e valida a integridade de um quadro recebido.
- * Funcionamento: É um filtro de segurança. Ela checa se o quadro tem tamanho mínimo aceitável (6 bytes),
- * se inicia com o byte mágico correto, se o tamanho do payload informado é condizente e se o código de verificação
- * de erro (FCS) recebido bate com o FCS calculado no momento. Se tudo estiver correto, preenche a estrutura 'frame'.
- * Parâmetros:
+ * Funcionamento: É um filtro de segurança. Ela checa se o quadro tem tamanho
+ * mínimo aceitável (6 bytes), se inicia com o byte mágico correto, se o tamanho
+ * do payload informado é condizente e se o código de verificação de erro (FCS)
+ * recebido bate com o FCS calculado no momento. Se tudo estiver correto,
+ * preenche a estrutura 'frame'. Parâmetros:
  *   - raw: Vetor com bytes brutos recebidos da biblioteca de rádio.
  *   - rawLen: Comprimento dos dados recebidos.
  *   - frame: Estrutura destino onde os campos decodificados serão copiados.
  * Retorno: O status resultante da decodificação (ex: FRAME_OK, FRAME_BAD_FCS).
  */
-ParseStatus decodeFrame(const uint8_t* raw, uint8_t rawLen, DecodedFrame& frame) {
-  if (rawLen < 6) return FRAME_TOO_SHORT;
-  if (raw[0] != FRAME_MAGIC) return FRAME_BAD_MAGIC;
+ParseStatus decodeFrame(const uint8_t *raw, uint8_t rawLen,
+                        DecodedFrame &frame) {
+  if (rawLen < 6)
+    return FRAME_TOO_SHORT;
+  if (raw[0] != FRAME_MAGIC)
+    return FRAME_BAD_MAGIC;
 
   uint8_t payloadLen = raw[3];
-  if (payloadLen > MAX_PAYLOAD) return FRAME_BAD_LEN;
-  if (rawLen != payloadLen + 6) return FRAME_BAD_LEN;
+  if (payloadLen > MAX_PAYLOAD)
+    return FRAME_BAD_LEN;
+  if (rawLen != payloadLen + 6)
+    return FRAME_BAD_LEN;
 
   uint16_t rxFcs = (uint16_t)raw[rawLen - 2] | ((uint16_t)raw[rawLen - 1] << 8);
-  uint16_t calc  = calcFCS(raw, rawLen - 2);
-  if (rxFcs != calc) return FRAME_BAD_FCS;
+  uint16_t calc = calcFCS(raw, rawLen - 2);
+  if (rxFcs != calc)
+    return FRAME_BAD_FCS;
 
   frame.type = raw[1];
-  frame.seq  = raw[2];
-  frame.len  = payloadLen;
+  frame.seq = raw[2];
+  frame.len = payloadLen;
   for (uint8_t i = 0; i < payloadLen; i++) {
     frame.payload[i] = raw[4 + i];
   }
@@ -187,16 +205,17 @@ ParseStatus decodeFrame(const uint8_t* raw, uint8_t rawLen, DecodedFrame& frame)
 
 /*
  * Função: sendAck
- * Objetivo: Envia um pacote de confirmação de recebimento (ACK) de volta ao transmissor.
- * Funcionamento: Após processar um quadro válido de dados, o receptor monta um quadro de ACK
- * com o mesmo número de sequência do quadro recebido. Ele introduz um pequeno atraso (delay de 450ms) para 
- * dar tempo de a biblioteca de rádio do transmissor passar de transmissão para escuta, envia o ACK e aguarda a conclusão.
- * Parâmetros:
+ * Objetivo: Envia um pacote de confirmação de recebimento (ACK) de volta ao
+ * transmissor. Funcionamento: Após processar um quadro válido de dados, o
+ * receptor monta um quadro de ACK com o mesmo número de sequência do quadro
+ * recebido. Ele introduz um pequeno atraso (delay de 450ms) para dar tempo de a
+ * biblioteca de rádio do transmissor passar de transmissão para escuta, envia o
+ * ACK e aguarda a conclusão. Parâmetros:
  *   - seq: O número de sequência a ser confirmado.
  */
 void sendAck(uint8_t seq) {
   delay(450);
-  
+
   uint8_t ackBuf[16];
   uint8_t ackLen = buildFrame(TYPE_ACK, seq, nullptr, 0, ackBuf);
 
@@ -209,8 +228,8 @@ void sendAck(uint8_t seq) {
 /*
  * Função: clearAssemblyBuffer
  * Objetivo: Limpa o buffer acumulador de mensagens e os estados dos fragmentos.
- * Funcionamento: Reseta o tamanho acumulador, o total de blocos esperados e zera os vetores
- * que rastreiam quais fragmentos foram recebidos.
+ * Funcionamento: Reseta o tamanho acumulador, o total de blocos esperados e
+ * zera os vetores que rastreiam quais fragmentos foram recebidos.
  */
 void clearAssemblyBuffer() {
   rxMessageLen = 0;
@@ -221,15 +240,15 @@ void clearAssemblyBuffer() {
 
 /*
  * Função: writePayloadAtOffset
- * Objetivo: Grava um fragmento de dados recebido na posição correta do buffer geral da mensagem.
- * Funcionamento: Utiliza o offset correspondente (seq * MAX_PAYLOAD) para gravar os bytes recebidos.
- * Possui proteção contra estouro de memória para não corromper o buffer de destino.
- * Parâmetros:
+ * Objetivo: Grava um fragmento de dados recebido na posição correta do buffer
+ * geral da mensagem. Funcionamento: Utiliza o offset correspondente (seq *
+ * MAX_PAYLOAD) para gravar os bytes recebidos. Possui proteção contra estouro
+ * de memória para não corromper o buffer de destino. Parâmetros:
  *   - data: Ponteiro para o payload recebido.
  *   - len: Tamanho do payload.
  *   - offset: Posição de escrita no buffer.
  */
-void writePayloadAtOffset(const uint8_t* data, uint8_t len, uint16_t offset) {
+void writePayloadAtOffset(const uint8_t *data, uint8_t len, uint16_t offset) {
   if (offset + len > RX_MESSAGE_BUFFER_SIZE) {
     Serial.println("RX: buffer da mensagem cheio, descartando bloco");
     return;
@@ -239,23 +258,23 @@ void writePayloadAtOffset(const uint8_t* data, uint8_t len, uint16_t offset) {
 
 /*
  * Função: showTextOnLcd
- * Objetivo: Exibe o texto recebido de forma formatada nas quatro linhas do display LCD 20x4.
- * Funcionamento: Limpa o visor, posiciona o cursor e escreve os caracteres respeitando
- * o limite de 20 caracteres por linha, quebrando o texto automaticamente para as linhas seguintes.
- * Parâmetros:
+ * Objetivo: Exibe o texto recebido de forma formatada nas quatro linhas do
+ * display LCD 20x4. Funcionamento: Limpa o visor, posiciona o cursor e escreve
+ * os caracteres respeitando o limite de 20 caracteres por linha, quebrando o
+ * texto automaticamente para as linhas seguintes. Parâmetros:
  *   - text: Ponteiro para a string de texto a ser exibida.
  */
-void showTextOnLcd(const char* text) {
+void showTextOnLcd(const char *text) {
   lcd.clear();
-  
+
   size_t len = strlen(text);
-  
+
   // Linha 0 (caracteres 0 a 19)
   lcd.setCursor(0, 0);
   for (size_t i = 0; i < len && i < 20; i++) {
     lcd.write(text[i]);
   }
-  
+
   // Linha 1 (caracteres 20 a 39)
   if (len > 20) {
     lcd.setCursor(0, 1);
@@ -283,10 +302,12 @@ void showTextOnLcd(const char* text) {
 
 /*
  * Função: onCompleteMessage
- * Objetivo: Processa e exibe a mensagem de texto completa quando todos os pedaços foram recebidos.
- * Funcionamento: É acionada após a recepção bem-sucedida do END e confirmação de todos os fragmentos.
- * Adiciona o caractere nulo ('\0') para formar uma String válida, exibe-a no Serial Monitor,
- * no display LCD I2C e, em seguida, limpa o buffer para a próxima mensagem.
+ * Objetivo: Processa e exibe a mensagem de texto completa quando todos os
+ * pedaços foram recebidos. Funcionamento: É acionada após a recepção
+ * bem-sucedida do END e confirmação de todos os fragmentos. Adiciona o
+ * caractere nulo ('\0') para formar uma String válida, exibe-a no Serial
+ * Monitor, no display LCD I2C e, em seguida, limpa o buffer para a próxima
+ * mensagem.
  */
 void onCompleteMessage() {
   char text[RX_MESSAGE_BUFFER_SIZE + 1];
@@ -304,17 +325,19 @@ void onCompleteMessage() {
 
 /*
  * Função: processValidFrame
- * Objetivo: Processa um quadro já decodificado e validado aplicando a lógica do Selective Repeat ARQ.
- * Funcionamento: Analisa o tipo do quadro:
- *   - Se for DATA: Se for o primeiro bloco de uma nova mensagem, atualiza o LCD para "Recebendo...".
- *     Grava o payload na posição correspondente ('seq * MAX_PAYLOAD'), marca o bloco como recebido e envia o ACK para 'seq'.
- *   - Se for END: Armazena o total de blocos esperados (que vem no campo 'seq'). Verifica se todos os fragmentos
- *     de 0 a N-1 foram recebidos. Se estiver completo, envia o ACK para 'N', calcula o tamanho total e reconstrói a mensagem.
- *     Se incompleto, não envia o ACK para que o transmissor retransmita.
- * Parâmetros:
+ * Objetivo: Processa um quadro já decodificado e validado aplicando a lógica do
+ * Selective Repeat ARQ. Funcionamento: Analisa o tipo do quadro:
+ *   - Se for DATA: Se for o primeiro bloco de uma nova mensagem, atualiza o LCD
+ * para "Recebendo...". Grava o payload na posição correspondente ('seq *
+ * MAX_PAYLOAD'), marca o bloco como recebido e envia o ACK para 'seq'.
+ *   - Se for END: Armazena o total de blocos esperados (que vem no campo
+ * 'seq'). Verifica se todos os fragmentos de 0 a N-1 foram recebidos. Se
+ * estiver completo, envia o ACK para 'N', calcula o tamanho total e reconstrói
+ * a mensagem. Se incompleto, não envia o ACK para que o transmissor
+ * retransmita. Parâmetros:
  *   - frame: Estrutura contendo o quadro decodificado de forma amigável.
  */
-void processValidFrame(const DecodedFrame& frame) {
+void processValidFrame(const DecodedFrame &frame) {
   if (frame.type == TYPE_DATA || frame.type == TYPE_END) {
     lastPacketTime = millis();
   }
@@ -322,7 +345,8 @@ void processValidFrame(const DecodedFrame& frame) {
   if (frame.type == TYPE_DATA) {
     uint8_t seq = frame.seq;
 
-    // Se for o primeiro fragmento recebido de uma nova mensagem, limpa a tela e mostra status
+    // Se for o primeiro fragmento recebido de uma nova mensagem, limpa a tela e
+    // mostra status
     bool anyReceived = false;
     for (int i = 0; i < 256; i++) {
       if (chunkReceived[i]) {
@@ -345,7 +369,8 @@ void processValidFrame(const DecodedFrame& frame) {
         uint16_t offset = seq * MAX_PAYLOAD;
         writePayloadAtOffset(frame.payload, frame.len, offset);
 
-        Serial.printf("RX: DATA novo seq=%u len=%u armazenado no offset=%u\n", seq, frame.len, offset);
+        Serial.printf("RX: DATA novo seq=%u len=%u armazenado no offset=%u\n",
+                      seq, frame.len, offset);
       } else {
         Serial.printf("RX: DATA duplicado seq=%u recebido novamente\n", seq);
       }
@@ -360,7 +385,9 @@ void processValidFrame(const DecodedFrame& frame) {
     uint8_t expectedTotal = frame.seq;
     totalChunks = expectedTotal;
 
-    Serial.printf("RX: END recebido indicando total de %u quadros. Verificando integridade da mensagem...\n", totalChunks);
+    Serial.printf("RX: END recebido indicando total de %u quadros. Verificando "
+                  "integridade da mensagem...\n",
+                  totalChunks);
 
     // Verifica se todos os fragmentos de 0 a totalChunks-1 foram recebidos
     bool complete = true;
@@ -372,10 +399,12 @@ void processValidFrame(const DecodedFrame& frame) {
     }
 
     if (complete) {
-      // Envia ACK para o END (o número total de chunks atua como seq para o END)
+      // Envia ACK para o END (o número total de chunks atua como seq para o
+      // END)
       sendAck(totalChunks);
 
-      // Calcula o tamanho real total somando os comprimentos dos blocos recebidos
+      // Calcula o tamanho real total somando os comprimentos dos blocos
+      // recebidos
       rxMessageLen = 0;
       for (uint8_t i = 0; i < totalChunks; i++) {
         rxMessageLen += chunkLengths[i];
@@ -383,7 +412,8 @@ void processValidFrame(const DecodedFrame& frame) {
 
       onCompleteMessage();
     } else {
-      Serial.println("RX: Mensagem incompleta. Aguardando retransmissão de quadros perdidos.");
+      Serial.println("RX: Mensagem incompleta. Aguardando retransmissão de "
+                     "quadros perdidos.");
     }
     return;
   }
@@ -396,8 +426,9 @@ void processValidFrame(const DecodedFrame& frame) {
 
 /*
  * Função: setup
- * Objetivo: Inicializa o hardware, o LCD I2C, a porta serial e a biblioteca de comunicação RF no receptor.
- * Funcionamento: É executada uma única vez na inicialização.
+ * Objetivo: Inicializa o hardware, o LCD I2C, a porta serial e a biblioteca de
+ * comunicação RF no receptor. Funcionamento: É executada uma única vez na
+ * inicialização.
  */
 void setup() {
   Serial.begin(115200);
@@ -420,7 +451,8 @@ void setup() {
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("Erro: RH_ASK");
-    while (true) delay(1000);
+    while (true)
+      delay(1000);
   }
 
   clearAssemblyBuffer();
@@ -432,7 +464,8 @@ void setup() {
  * Objetivo: Loop de execução contínua no receptor.
  */
 void loop() {
-  // Verifica se há alguma mensagem em andamento e limpa por inatividade (timeout de 4 segundos)
+  // Verifica se há alguma mensagem em andamento e limpa por inatividade
+  // (timeout de 4 segundos)
   bool active = false;
   for (int i = 0; i < 256; i++) {
     if (chunkReceived[i]) {
@@ -441,10 +474,11 @@ void loop() {
     }
   }
 
-  if (active && (millis() - lastPacketTime > 4000)) {
-    Serial.println("RX: tempo limite de inatividade atingido (4s), limpando buffer de montagem");
+  if (active && (millis() - lastPacketTime > 8000)) {
+    Serial.println("RX: tempo limite de inatividade atingido (4s), limpando "
+                   "buffer de montagem");
     clearAssemblyBuffer();
-    
+
     // Restaura as mensagens iniciais do LCD
     lcd.clear();
     lcd.setCursor(0, 0);

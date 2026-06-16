@@ -432,8 +432,9 @@ bool sendBufferReliable(const uint8_t *data, size_t totalLen) {
           // Envia o fragmento
           sendDataFrame(i, data + offset, chunkSize, attemptCount[i]);
 
-          // Espaçamento e escuta ativa por ACKs por até 1200ms para evitar colisões half-duplex
-          // do canal RF de 500bps, interrompendo precocemente caso o ACK deste bloco chegue.
+          // Espaçamento e escuta ativa por ACKs por até 1200ms para evitar
+          // colisões half-duplex do canal RF de 500bps, interrompendo
+          // precocemente caso o ACK deste bloco chegue.
           unsigned long startListen = millis();
           while (millis() - startListen < 1200) {
             listenForAcksDuring(50, acked, sendBase, numChunks);
@@ -443,7 +444,8 @@ bool sendBufferReliable(const uint8_t *data, size_t totalLen) {
           }
           sentSomething = true;
 
-          // Interrompe o loop 'for' para avaliar o deslizamento da base da janela
+          // Interrompe o loop 'for' para avaliar o deslizamento da base da
+          // janela
           break;
         }
       }
