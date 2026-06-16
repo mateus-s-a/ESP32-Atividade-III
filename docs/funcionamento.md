@@ -1,15 +1,17 @@
 # Como o Projeto Funciona: Passo a Passo
 
-Este documento apresenta a descrição detalhada e o fluxo de execução lógica do protocolo de comunicação de dados sem fio estabelecido entre o transmissor e o receptor, utilizando uma abordagem estruturada passo a passo.
+Este documento apresenta a descrição detalhada e o fluxo de execução lógica do protocolo de comunicação de dados sem fio estabelecido entre o transmissor e o receptor, utilizando uma abordagem estruturada passo a passo sob o modelo **Selective Repeat ARQ**.
 
 ---
 
 ## A Analogia com o Sistema Postal
 
-Para elucidar os princípios de transmissão por radiofrequência (RF) e o controle de fluxo projetado, pode-se traçar um paralelo com um serviço postal de entrega:
+Para elucidar os princípios de transmissão por radiofrequência (RF) e o controle de fluxo projetado, pode-se traçar um paralelo com um serviço postal de entrega com janela deslizante:
 *   **Fragmentação de Dados:** Um documento extenso (mensagem de texto) é subdividido em páginas menores para caber em envelopes com capacidade restrita a 24 caracteres (limite definido pelo `MAX_PAYLOAD`).
-*   **Confirmação de Recebimento (ACK):** O remetente envia um único envelope e suspende novos envios até receber um cartão de confirmação assinado pelo destinatário atestando o recebimento daquela página específica (ex: "Recebi a página 0").
-*   **Estouro de Tempo (Timeout):** Caso a confirmação de recebimento não retorne dentro de um período preestabelecido, presume-se que houve extravio ou dano física à correspondência, disparando a retransmissão automática do mesmo envelope.
+*   **Janela Deslizante de Transmissão:** O remetente pode colocar na caixa de correio até 4 envelopes consecutivos (tamanho da janela $W = 4$) de uma única vez, sem a necessidade de esperar que o destinatário confirme o primeiro para selar os demais.
+*   **Confirmação Seletiva (ACK Individual):** O destinatário envia um cartão postal confirmando individualmente o recebimento de cada página específica (ex: "Recebi o envelope 2").
+*   **Retransmissão Seletiva:** Se o envelope 1 for extraviado mas os envelopes 0, 2 e 3 forem entregues com sucesso, o remetente receberá confirmações para os envelopes 0, 2 e 3. Ele identificará que apenas o envelope 1 falhou e retransmitirá **exclusivamente o envelope 1**, otimizando a eficiência e o uso do canal.
+*   **Reorganização no Destinatário:** O destinatário armazena os envelopes recebidos fora de ordem e os posiciona na ordem correta das páginas correspondentes, fazendo a leitura do documento apenas quando todas as páginas estiverem presentes.
 
 ---
 
@@ -18,9 +20,10 @@ Para elucidar os princípios de transmissão por radiofrequência (RF) e o contr
 Antes da compilação, o sistema configura as seguintes diretivas globais que determinam o comportamento operacional dos dispositivos:
 
 *   **`RF_BITRATE 500`:** Define a taxa de transmissão física do sinal de rádio para 500 bits por segundo. Uma taxa baixa é adotada para minimizar a taxa de erro de bits sob condições severas de ruído ambiental.
+*   **`WINDOW_SIZE 4`:** Tamanho da janela deslizante que estipula o número máximo de pacotes que o transmissor pode enviar consecutivamente sem receber confirmações intermediárias.
 *   **`USE_CRC16`:** Seletor lógico que define o algoritmo de integridade. Se definido como `true`, o sistema utiliza o mecanismo matemático **CRC-16-CCITT**; se `false`, adota-se o método **Checksum de 16 bits**.
-*   **`ACK_TIMEOUT_MS 2500`:** Limite de tempo (2,5 segundos) que o transmissor aguarda pela resposta de confirmação (ACK) antes de considerar o pacote perdido.
-*   **`MAX_RETRIES 6`:** Número máximo de tentativas de retransmissão permitidas antes do encerramento da conexão devido à instabilidade do canal físico.
+*   **`ACK_TIMEOUT_MS 2500`:** Limite de tempo (2,5 segundos) que o transmissor aguarda pela resposta de confirmação de cada pacote individual antes de disparar sua retransmissão seletiva.
+*   **`MAX_RETRIES 6`:** Número máximo de tentativas de retransmissão permitidas para cada bloco individual antes do encerramento da conexão devido à instabilidade do canal físico.
 
 ---
 
@@ -33,9 +36,9 @@ Ao energizar as placas microcontroladoras ESP32, as seguintes rotinas de hardwar
     *   Inicializa o driver de radiofrequência (`driver.init()`).
     *   Exibe no monitor de saída a tela de inicialização do sistema com os comandos disponíveis.
 2.  **Rotina do Receptor (RX):**
-    *   Inicializa o canal de comunicação serial USB.
+    *   Inicializa a comunicação serial USB.
     *   Inicializa o driver de recepção de radiofrequência.
-    *   Inicializa e limpa a tela do display LCD físico (I2C), exibindo a mensagem de status "Aguardando dados".
+    *   Inicializa e limpa a tela do display LCD físico (I2C), exibindo a mensagem de status `"RX pronto"` na primeira linha e `"Aguardando..."` na segunda.
 
 ---
 
@@ -66,39 +69,38 @@ Abaixo descreve-se o caminho e a transformação dos dados desde a entrada do co
 ```
 
 ### Fase A: Processamento e Envio (Transmissor)
-1.  O usuário envia a string `"Hello World"` através do terminal serial.
+1.  O usuário envia a string `"Hello World"` através do terminal serial do transmissor.
 2.  O sistema identifica a entrada e chama o método **`sendTextMessage()`**.
-3.  Como a string contém 11 bytes, ela é alocada integralmente em um único bloco, dispensando fragmentações múltiplas.
-4.  O método **`buildFrame()`** monta a estrutura de cabeçalho e rodapé do quadro de dados:
+3.  Como a string contém 11 bytes, ela é dividida em apenas **1 fragmento** (índice 0), pois o tamanho é inferior ao limite de payload de 24 bytes.
+4.  O método **`buildFrame()`** monta o quadro de dados com cabeçalho e rodapé:
     *   Insere o byte delimitador de início de quadro `0xA5` (Magic Byte).
-    *   Configura os metadados: tipo de quadro (`TYPE_DATA`), sequência (`0`) e tamanho útil (`11`).
+    *   Configura os metadados: tipo de quadro (`TYPE_DATA`), sequência (`0`, indicando o índice absoluto do bloco) e tamanho útil (`11`).
     *   Copia a mensagem `"Hello World"` para a seção de payload.
-    *   Chama a função **`calcFCS()`** para calcular o código de verificação dos dados e anexa os 2 bytes resultantes ao final da estrutura.
-5.  O transmissor comuta a antena para modo de envio, emite o quadro binário gerado e dispara o temporizador interno de confirmação (`waitForAck()`).
+    *   Chama a função **`calcFCS()`** para calcular a assinatura digital (CRC-16 ou Checksum) e anexa os 2 bytes resultantes ao final do quadro.
+5.  O transmissor emite o quadro no ar e registra o tempo de envio em `lastSentTime[0]`. Em seguida, inicia o período de 500ms de escuta ativa por ACKs (`listenForAcksDuring()`).
 
 ### Fase B: Recepção e Validação (Receptor)
 1.  O receptor detecta as oscilações de rádio e realiza a leitura do buffer bruto recebido.
-2.  Chama a função **`decodeFrame()`** para validação:
-    *   Verifica se o tamanho atende aos requisitos mínimos de cabeçalho e valida a assinatura inicial (`0xA5`).
-    *   Recalcula localmente a assinatura (FCS) e compara com os bytes finais recebidos do transmissor.
-    *   **Quadro Corrompido:** Caso as assinaturas divirjam, o receptor descarta o pacote de forma silenciosa e aguarda o próximo sinal de transmissão.
-    *   **Quadro Íntegro:** Se as assinaturas forem idênticas, o receptor armazena o payload no buffer interno.
-3.  O receptor introduz uma pausa de **450 milissegundos** para garantir que a comutação de hardware do transmissor (de TX para RX) seja concluída.
-4.  O receptor constrói um quadro de confirmação (**ACK**) com tamanho de 6 bytes e envia o pacote de volta com o respectivo número de sequência (`0`).
+2.  Como é o primeiro bloco recebido da mensagem, o receptor limpa a tela do LCD e exibe temporariamente a mensagem `"Recebendo..."`.
+3.  Chama a função **`decodeFrame()`** para validação:
+    *   Verifica a assinatura inicial `0xA5` e se o tamanho do pacote é coerente.
+    *   Recalcula localmente o FCS e compara com os bytes finais recebidos do transmissor.
+    *   **Quadro Íntegro:** O receptor armazena o payload no buffer interno no local exato correspondente ao índice (neste caso, offset `0 * MAX_PAYLOAD`).
+4.  O receptor introduz uma pausa de **450 milissegundos** para comutação de hardware e envia de volta um quadro de confirmação (**ACK**) contendo `seq = 0`.
 
 ### Fase C: Conclusão do Protocolo (Transmissor & Receptor)
-1.  O transmissor capta o quadro de confirmação (ACK 0), valida seus metadados e avança para a próxima etapa, alternando a sequência esperada de `0` para `1`.
-2.  O transmissor monta e envia um quadro sinalizador do tipo **`TYPE_END`** (Fim de Transmissão) com sequência `1` para indicar o término da mensagem.
-3.  O receptor capta o quadro de encerramento, retorna o respectivo ACK 1 ao transmissor e finaliza o processo:
-    *   Insere o caractere terminador `\0` para transformar os bytes do buffer em uma String de C válida.
-    *   Exibe a mensagem `"Hello World"` no monitor serial e no LCD físico.
-    *   Reseta o buffer interno, retornando ao estado de escuta.
+1.  O transmissor capta o `ACK(0)` dentro da janela de escuta, marca o bloco 0 como confirmado (`acked[0] = true`) e avança a janela.
+2.  Como todos os fragmentos da mensagem foram confirmados, o transmissor monta e envia um quadro de encerramento do tipo **`TYPE_END`** contendo `seq = 1` (total de fragmentos enviados).
+3.  O receptor capta o quadro `END` indicando total de 1 bloco. Ele verifica se todos os blocos do intervalo `0` a `0` foram recebidos.
+    *   Constatando a integridade, o receptor envia o `ACK(1)` correspondente ao transmissor e chama a função **`onCompleteMessage()`**.
+    *   A função insere o caractere terminador `\0`, imprime a string `"Hello World"` no monitor serial e no LCD físico (permanecendo persistente na tela).
+    *   O receptor limpa o buffer e os estados internos de fragmentos, aguardando o próximo ciclo de comunicação.
 
 ---
 
 ## 4. Diagrama de Estados do Protocolo
 
-O fluxo a seguir ilustra a sequência cronológica de troca de mensagens e confirmações entre as duas pontas sob o protocolo Stop-and-Wait ARQ:
+O fluxo a seguir ilustra a sequência de troca de mensagens, confirmações e retransmissões seletivas sob o protocolo Selective Repeat ARQ:
 
 ```mermaid
 sequenceDiagram
@@ -112,21 +114,21 @@ sequenceDiagram
     %% Caso de sucesso
     Note over Usuario, TX: 1. Envio Manual de Texto
     Usuario->>TX: Insere "Hello World" via Terminal
-    TX->>TX: Gera Quadro DATA (Seq=0) com FCS
-    TX->>Canal: Transmite Quadro de Dados (Seq=0)
-    Canal->>RX: Recebe Sinal RF do DATA (Seq=0)
-    RX->>RX: Valida Assinatura FCS (OK) e Armazena
+    TX->>TX: Segmenta mensagem em 1 bloco (Total = 1)
+    TX->>Canal: Transmite DATA (Seq=0)
+    Canal->>RX: Entrega DATA (Seq=0)
+    Note over RX: LCD exibe "Recebendo..."
+    RX->>RX: Valida FCS (OK) e armazena no offset 0
     RX->>Canal: Transmite Confirmação ACK (Seq=0)
-    Canal->>TX: Recebe Sinal RF do ACK (Seq=0)
-    Note over TX: Transmissor avança sequência para 1
+    Canal->>TX: Entrega ACK (Seq=0)
+    Note over TX: Todos os blocos de dados confirmados
 
     Note over TX, RX: 2. Encerramento da Transmissão
-    TX->>TX: Gera Quadro END (Seq=1) com FCS
-    TX->>Canal: Transmite Quadro de Fim (Seq=1)
-    Canal->>RX: Recebe Sinal RF do END (Seq=1)
-    RX->>RX: Valida Assinatura FCS (OK)
+    TX->>Canal: Transmite END (Seq=1)
+    Canal->>RX: Entrega END (Seq=1)
+    RX->>RX: Confirma que todos os 1 fragmentos foram recebidos
     RX->>LCD: Imprime "Hello World" no visor físico
-    RX->>Canal: Transmite Confirmação ACK (Seq=1)
-    Canal->>TX: Recebe Sinal RF do ACK (Seq=1)
+    RX->>Canal: Transmite ACK (Seq=1) para o END
+    Canal->>TX: Entrega ACK (Seq=1)
     Note over TX: Transmissão finalizada com sucesso!
 ```

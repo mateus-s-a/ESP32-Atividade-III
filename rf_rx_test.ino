@@ -1,5 +1,10 @@
 #include <RH_ASK.h>
 #include <SPI.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+// Instanciação do LCD 16x2 no endereço I2C 0x27
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 #define RF_BITRATE 500
 #define RF_RX_PIN 26
@@ -32,9 +37,11 @@ enum ParseStatus {
   FRAME_BAD_FCS
 };
 
-uint8_t expectedSeq = 0;
 uint8_t rxMessage[RX_MESSAGE_BUFFER_SIZE];
 size_t rxMessageLen = 0;
+bool chunkReceived[256] = {false};
+uint8_t chunkLengths[256] = {0};
+uint8_t totalChunks = 0;
 
 /*
  * Função: checksum16
@@ -200,41 +207,69 @@ void sendAck(uint8_t seq) {
 
 /*
  * Função: clearAssemblyBuffer
- * Objetivo: Limpa o buffer acumulador de mensagens.
- * Funcionamento: Zera o tamanho acumulado da mensagem recebida (rxMessageLen = 0), preparando
- * o buffer para receber novos conjuntos de fragmentos.
+ * Objetivo: Limpa o buffer acumulador de mensagens e os estados dos fragmentos.
+ * Funcionamento: Reseta o tamanho acumulador, o total de blocos esperados e zera os vetores
+ * que rastreiam quais fragmentos foram recebidos.
  */
 void clearAssemblyBuffer() {
   rxMessageLen = 0;
+  totalChunks = 0;
+  memset(chunkReceived, 0, sizeof(chunkReceived));
+  memset(chunkLengths, 0, sizeof(chunkLengths));
 }
 
 /*
- * Função: appendPayload
- * Objetivo: Acumula um fragmento de payload de dados recebido no buffer geral da mensagem.
- * Funcionamento: Como as mensagens grandes vêm fragmentadas em vários pacotes menores,
- * essa função anexa os novos dados recebidos ao final do acumulador temporário 'rxMessage'. Ela também
- * protege contra estouro de memória caso a mensagem seja maior que a capacidade do buffer.
+ * Função: writePayloadAtOffset
+ * Objetivo: Grava um fragmento de dados recebido na posição correta do buffer geral da mensagem.
+ * Funcionamento: Utiliza o offset correspondente (seq * MAX_PAYLOAD) para gravar os bytes recebidos.
+ * Possui proteção contra estouro de memória para não corromper o buffer de destino.
  * Parâmetros:
- *   - data: Ponteiro para o pedaço de payload recebido.
- *   - len: Tamanho desse pedaço de payload.
+ *   - data: Ponteiro para o payload recebido.
+ *   - len: Tamanho do payload.
+ *   - offset: Posição de escrita no buffer.
  */
-void appendPayload(const uint8_t* data, uint8_t len) {
-  if (rxMessageLen + len > RX_MESSAGE_BUFFER_SIZE) {
-    Serial.println("RX: buffer da mensagem cheio, descartando montagem atual");
-    clearAssemblyBuffer();
+void writePayloadAtOffset(const uint8_t* data, uint8_t len, uint16_t offset) {
+  if (offset + len > RX_MESSAGE_BUFFER_SIZE) {
+    Serial.println("RX: buffer da mensagem cheio, descartando bloco");
     return;
   }
+  memcpy(rxMessage + offset, data, len);
+}
 
-  memcpy(rxMessage + rxMessageLen, data, len);
-  rxMessageLen += len;
+/*
+ * Função: showTextOnLcd
+ * Objetivo: Exibe o texto recebido de forma formatada nas duas linhas do display LCD 16x2.
+ * Funcionamento: Limpa o visor, posiciona o cursor e escreve os primeiros 16 caracteres
+ * na primeira linha. Se o texto exceder 16 caracteres, quebra a mensagem para a segunda linha.
+ * Parâmetros:
+ *   - text: Ponteiro para a string de texto a ser exibida.
+ */
+void showTextOnLcd(const char* text) {
+  lcd.clear();
+  
+  size_t len = strlen(text);
+  
+  // Primeira linha (caracteres 0 a 15)
+  lcd.setCursor(0, 0);
+  for (size_t i = 0; i < len && i < 16; i++) {
+    lcd.write(text[i]);
+  }
+  
+  // Segunda linha (caracteres 16 a 31)
+  if (len > 16) {
+    lcd.setCursor(0, 1);
+    for (size_t i = 16; i < len && i < 32; i++) {
+      lcd.write(text[i]);
+    }
+  }
 }
 
 /*
  * Função: onCompleteMessage
  * Objetivo: Processa e exibe a mensagem de texto completa quando todos os pedaços foram recebidos.
- * Funcionamento: É acionada após o recebimento do quadro especial de término (TYPE_END).
- * Ela adiciona um caractere nulo ('\0') no final do buffer de bytes para que ele se comporte como uma String de C
- * válida e exibe a mensagem completa no Serial Monitor. Após isso, limpa o buffer para o próximo ciclo de recepção.
+ * Funcionamento: É acionada após a recepção bem-sucedida do END e confirmação de todos os fragmentos.
+ * Adiciona o caractere nulo ('\0') para formar uma String válida, exibe-a no Serial Monitor,
+ * no display LCD I2C e, em seguida, limpa o buffer para a próxima mensagem.
  */
 void onCompleteMessage() {
   char text[RX_MESSAGE_BUFFER_SIZE + 1];
@@ -244,54 +279,91 @@ void onCompleteMessage() {
   Serial.println("RX: mensagem completa reconstruida:");
   Serial.println(text);
 
-  // TODO quando adicionar o LCD:
-  // showTextOnLcd(text);
+  // Exibe a mensagem no display LCD I2C
+  showTextOnLcd(text);
 
   clearAssemblyBuffer();
 }
 
 /*
  * Função: processValidFrame
- * Objetivo: Processa um quadro já decodificado e validado e executa a lógica do protocolo Stop-and-Wait.
+ * Objetivo: Processa um quadro já decodificado e validado aplicando a lógica do Selective Repeat ARQ.
  * Funcionamento: Analisa o tipo do quadro:
- *   - Se for DATA com a sequência esperada, anexa ao buffer, imprime o fragmento, envia o ACK correspondente
- *     e inverte a sequência esperada (0 vira 1, 1 vira 0). Se for DATA duplicado, apenas reenvia o ACK.
- *   - Se for END (fim da mensagem) com a sequência esperada, envia ACK, inverte a sequência esperada e 
- *     chama a rotina para mostrar a mensagem completa.
+ *   - Se for DATA: Se for o primeiro bloco de uma nova mensagem, atualiza o LCD para "Recebendo...".
+ *     Grava o payload na posição correspondente ('seq * MAX_PAYLOAD'), marca o bloco como recebido e envia o ACK para 'seq'.
+ *   - Se for END: Armazena o total de blocos esperados (que vem no campo 'seq'). Verifica se todos os fragmentos
+ *     de 0 a N-1 foram recebidos. Se estiver completo, envia o ACK para 'N', calcula o tamanho total e reconstrói a mensagem.
+ *     Se incompleto, não envia o ACK para que o transmissor retransmita.
  * Parâmetros:
  *   - frame: Estrutura contendo o quadro decodificado de forma amigável.
  */
 void processValidFrame(const DecodedFrame& frame) {
   if (frame.type == TYPE_DATA) {
-    if (frame.seq == expectedSeq) {
-      appendPayload(frame.payload, frame.len);
+    uint8_t seq = frame.seq;
 
-      Serial.printf("RX: DATA novo seq=%u len=%u\n", frame.seq, frame.len);
-      Serial.print("RX: payload parcial = ");
-      for (uint8_t i = 0; i < frame.len; i++) Serial.write(frame.payload[i]);
-      Serial.println();
-
-      sendAck(frame.seq);
-      expectedSeq ^= 1;
-      return;
+    // Se for o primeiro fragmento recebido de uma nova mensagem, limpa a tela e mostra status
+    bool anyReceived = false;
+    for (int i = 0; i < 256; i++) {
+      if (chunkReceived[i]) {
+        anyReceived = true;
+        break;
+      }
     }
 
-    Serial.printf("RX: DATA duplicado seq=%u -> reenviando ACK sem reprocessar\n", frame.seq);
-    sendAck(frame.seq);
+    if (!anyReceived) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Recebendo...");
+    }
+
+    if (seq < 256) {
+      if (!chunkReceived[seq]) {
+        chunkReceived[seq] = true;
+        chunkLengths[seq] = frame.len;
+
+        uint16_t offset = seq * MAX_PAYLOAD;
+        writePayloadAtOffset(frame.payload, frame.len, offset);
+
+        Serial.printf("RX: DATA novo seq=%u len=%u armazenado no offset=%u\n", seq, frame.len, offset);
+      } else {
+        Serial.printf("RX: DATA duplicado seq=%u recebido novamente\n", seq);
+      }
+
+      // Envia o ACK correspondente ao fragmento recebido
+      sendAck(seq);
+    }
     return;
   }
 
   if (frame.type == TYPE_END) {
-    if (frame.seq == expectedSeq) {
-      Serial.printf("RX: END novo seq=%u\n", frame.seq);
-      sendAck(frame.seq);
-      expectedSeq ^= 1;
-      onCompleteMessage();
-      return;
+    uint8_t expectedTotal = frame.seq;
+    totalChunks = expectedTotal;
+
+    Serial.printf("RX: END recebido indicando total de %u quadros. Verificando integridade da mensagem...\n", totalChunks);
+
+    // Verifica se todos os fragmentos de 0 a totalChunks-1 foram recebidos
+    bool complete = true;
+    for (uint8_t i = 0; i < totalChunks; i++) {
+      if (!chunkReceived[i]) {
+        complete = false;
+        Serial.printf("RX: Falta o quadro seq=%u\n", i);
+      }
     }
 
-    Serial.printf("RX: END duplicado seq=%u -> reenviando ACK\n", frame.seq);
-    sendAck(frame.seq);
+    if (complete) {
+      // Envia ACK para o END (o número total de chunks atua como seq para o END)
+      sendAck(totalChunks);
+
+      // Calcula o tamanho real total somando os comprimentos dos blocos recebidos
+      rxMessageLen = 0;
+      for (uint8_t i = 0; i < totalChunks; i++) {
+        rxMessageLen += chunkLengths[i];
+      }
+
+      onCompleteMessage();
+    } else {
+      Serial.println("RX: Mensagem incompleta. Aguardando retransmissão de quadros perdidos.");
+    }
     return;
   }
 
@@ -303,9 +375,8 @@ void processValidFrame(const DecodedFrame& frame) {
 
 /*
  * Função: setup
- * Objetivo: Inicializa o hardware, a porta serial e a biblioteca de comunicação RF no receptor.
- * Funcionamento: É executada uma única vez quando o ESP32 inicia. Define a taxa da porta serial,
- * inicializa o driver de RF (RH_ASK) e zera o buffer de montagem da mensagem.
+ * Objetivo: Inicializa o hardware, o LCD I2C, a porta serial e a biblioteca de comunicação RF no receptor.
+ * Funcionamento: É executada uma única vez na inicialização.
  */
 void setup() {
   Serial.begin(115200);
@@ -313,8 +384,20 @@ void setup() {
 
   Serial.println("RX: iniciando protocolo confiável");
 
+  // Inicialização do display LCD I2C
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("RX pronto");
+  lcd.setCursor(0, 1);
+  lcd.print("Aguardando...");
+
   if (!driver.init()) {
     Serial.println("RX: falha ao iniciar RH_ASK");
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Erro: RH_ASK");
     while (true) delay(1000);
   }
 
@@ -325,9 +408,6 @@ void setup() {
 /*
  * Função: loop
  * Objetivo: Loop de execução contínua no receptor.
- * Funcionamento: Fica monitorando constantemente o driver de rádio para ver se algum pacote chegou.
- * Se um pacote bruto for recebido, a função decodifica-o e, caso não apresente problemas de integridade (FCS),
- * encaminha-o para a função que processa os quadros do protocolo de parada-e-espera.
  */
 void loop() {
   uint8_t raw[64];

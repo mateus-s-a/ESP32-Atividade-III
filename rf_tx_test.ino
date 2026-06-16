@@ -16,6 +16,7 @@ const uint8_t MAX_PAYLOAD = 24;
 const uint16_t ACK_TIMEOUT_MS = 2500;
 const uint8_t MAX_RETRIES = 6;
 const uint8_t ERROR_EVERY_N_DATA_FRAMES = 4;
+const uint8_t WINDOW_SIZE = 4;
 
 RH_ASK driver(RF_BITRATE, RF_RX_PIN, RF_TX_PIN, -1, false);
 
@@ -255,84 +256,178 @@ void maybeCorruptFirstAttempt(uint8_t* frame, uint8_t frameLen, bool shouldCorru
 }
 
 /*
- * Função: sendStopAndWaitFrame
- * Objetivo: Envia um único quadro e gerencia retransmissões usando a técnica Stop-and-Wait.
- * Funcionamento: Ela envia o pacote pelo transmissor de RF e espera pela confirmação (ACK).
- * Se o ACK não chegar dentro do tempo limite, ela retransmite o mesmo quadro, fazendo isso até um máximo de MAX_RETRIES vezes.
- * Também controla a simulação de erros nas transmissões de DATA.
+ * Função: sendDataFrame
+ * Objetivo: Envia um único quadro de dados (DATA) com o índice/sequência específico.
+ * Funcionamento: Constrói o quadro com o payload correspondente ao fragmento atual,
+ * aplica a injeção de erro simulada se habilitado (apenas na 1ª tentativa) e transmite via RF.
  * Parâmetros:
- *   - type: Tipo do quadro a enviar (ex: DATA, END).
- *   - payload: Ponteiro para os dados a serem transmitidos.
- *   - len: Tamanho dos dados.
- * Retorno: True se o quadro foi enviado e confirmado com sucesso; False se esgotaram as tentativas (falha).
+ *   - seq: Índice absoluto do fragmento.
+ *   - payload: Ponteiro para o pedaço de dados.
+ *   - len: Tamanho do pedaço de dados.
+ *   - attempt: Número da tentativa atual de envio.
  */
-bool sendStopAndWaitFrame(uint8_t type, const uint8_t* payload, uint8_t len) {
+void sendDataFrame(uint8_t seq, const uint8_t* payload, uint8_t len, uint8_t attempt) {
   uint8_t pristine[64];
-  uint8_t frameLen = buildFrame(type, nextSeq, payload, len, pristine);
+  uint8_t frameLen = buildFrame(TYPE_DATA, seq, payload, len, pristine);
 
   bool corruptThisFrame = false;
-  if (type == TYPE_DATA) {
+  if (attempt == 1) {
     dataFrameCounter++;
     corruptThisFrame = injectErrors && ((dataFrameCounter % ERROR_EVERY_N_DATA_FRAMES) == 0);
   }
 
-  for (uint8_t attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    uint8_t txBuf[64];
-    memcpy(txBuf, pristine, frameLen);
+  uint8_t txBuf[64];
+  memcpy(txBuf, pristine, frameLen);
 
-    if (attempt == 1 && corruptThisFrame) {
-      maybeCorruptFirstAttempt(txBuf, frameLen, true);
-      Serial.println("TX: erro proposital injetado neste DATA");
-    }
-
-    driver.send(txBuf, frameLen);
-    driver.waitPacketSent();
-
-    Serial.printf("TX: enviou %s seq=%u len=%u tentativa=%u\n",
-                  typeToStr(type), nextSeq, len, attempt);
-
-    if (waitForAck(nextSeq)) {
-      nextSeq ^= 1;
-      return true;
-    }
-
-    Serial.println("TX: timeout de ACK, retransmitindo...");
-    delay(40);
+  if (corruptThisFrame) {
+    maybeCorruptFirstAttempt(txBuf, frameLen, true);
+    Serial.printf("TX: erro proposital injetado no DATA seq=%u\n", seq);
   }
 
-  Serial.printf("TX: falha definitiva no quadro %s seq=%u\n", typeToStr(type), nextSeq);
-  return false;
+  driver.send(txBuf, frameLen);
+  driver.waitPacketSent();
+
+  Serial.printf("TX: enviou DATA seq=%u len=%u tentativa=%u\n", seq, len, attempt);
+}
+
+/*
+ * Função: sendEndFrame
+ * Objetivo: Envia o quadro sinalizador de término (END) com o total de fragmentos enviados.
+ * Funcionamento: Constrói o quadro END transportando no campo 'seq' o número total de blocos da mensagem.
+ * Parâmetros:
+ *   - totalChunks: Quantidade total de blocos DATA da mensagem.
+ *   - attempt: Número da tentativa atual.
+ */
+void sendEndFrame(uint8_t totalChunks, uint8_t attempt) {
+  uint8_t pristine[64];
+  uint8_t frameLen = buildFrame(TYPE_END, totalChunks, nullptr, 0, pristine);
+
+  driver.send(pristine, frameLen);
+  driver.waitPacketSent();
+
+  Serial.printf("TX: enviou END (totalChunks=%u) tentativa=%u\n", totalChunks, attempt);
+}
+
+/*
+ * Função: listenForAcksDuring
+ * Objetivo: Escuta e processa quadros de ACK recebidos durante um intervalo de tempo especificado.
+ * Funcionamento: Executa um loop não-bloqueante lendo o rádio por 'durationMs' milissegundos.
+ * Se decodificar um ACK válido correspondente a um fragmento da mensagem, marca-o como confirmado
+ * e tenta deslizar a base da janela de transmissão ('sendBase').
+ * Parâmetros:
+ *   - durationMs: Tempo máximo de escuta em milissegundos.
+ *   - acked: Vetor de controle de ACKs dos fragmentos.
+ *   - sendBase: Referência para a base da janela deslizante.
+ *   - numChunks: Total de fragmentos da mensagem.
+ */
+void listenForAcksDuring(unsigned long durationMs, bool* acked, uint8_t& sendBase, uint8_t numChunks) {
+  unsigned long start = millis();
+  while (millis() - start < durationMs) {
+    uint8_t buf[64];
+    uint8_t len = sizeof(buf);
+
+    if (driver.recv(buf, &len)) {
+      DecodedFrame frame;
+      ParseStatus st = decodeFrame(buf, len, frame);
+
+      if (st == FRAME_OK && frame.type == TYPE_ACK) {
+        uint8_t ackSeq = frame.seq;
+        if (ackSeq < numChunks) {
+          if (!acked[ackSeq]) {
+            acked[ackSeq] = true;
+            Serial.printf("TX: ACK confirmado para seq=%u\n", ackSeq);
+
+            // Desliza a base da janela se possível
+            while (sendBase < numChunks && acked[sendBase]) {
+              sendBase++;
+            }
+          }
+        }
+      }
+    }
+    delay(10);
+  }
 }
 
 /*
  * Função: sendBufferReliable
- * Objetivo: Transmite um bloco de dados grande de forma confiável, dividindo-o em vários quadros se necessário.
- * Funcionamento: Como o transmissor possui um limite físico de tamanho por quadro (MAX_PAYLOAD),
- * essa função fragmenta o bloco de dados original em vários blocos menores (chunks), envia cada um como um quadro
- * de DATA (esperando confirmação para cada um) e, após enviar tudo, envia um quadro de fim (END) para concluir.
+ * Objetivo: Transmite um bloco de dados grande de forma confiável usando o protocolo Selective Repeat ARQ.
+ * Funcionamento: Segmenta a mensagem em fragmentos de tamanho 'MAX_PAYLOAD'. Gerencia uma janela deslizante
+ * de tamanho 'WINDOW_SIZE'. Envia múltiplos quadros da janela, escutando confirmações ativamente no intervalo.
+ * Retransmite individualmente apenas os quadros que estourarem o timeout, até o limite de MAX_RETRIES.
+ * Ao final, envia o quadro de encerramento END e espera a sua confirmação.
  * Parâmetros:
- *   - data: Ponteiro para o bloco de dados original.
- *   - totalLen: Tamanho total do bloco de dados.
- * Retorno: True se todos os pedaços e o fim foram transmitidos e confirmados; False se algum falhou.
+ *   - data: Ponteiro para a sequência de bytes.
+ *   - totalLen: Tamanho total da mensagem.
+ * Retorno: True se todos os blocos e o END foram confirmados; False caso contrário.
  */
 bool sendBufferReliable(const uint8_t* data, size_t totalLen) {
-  size_t offset = 0;
+  uint8_t numChunks = (totalLen + MAX_PAYLOAD - 1) / MAX_PAYLOAD;
+  if (numChunks == 0) numChunks = 1;
 
-  while (offset < totalLen) {
-    uint8_t chunk = (totalLen - offset > MAX_PAYLOAD) ? MAX_PAYLOAD : (uint8_t)(totalLen - offset);
+  bool acked[256] = {false};
+  uint32_t lastSentTime[256] = {0};
+  uint8_t attemptCount[256] = {0};
 
-    if (!sendStopAndWaitFrame(TYPE_DATA, data + offset, chunk)) {
-      return false;
+  uint8_t sendBase = 0;
+
+  Serial.printf("TX: iniciando envio confiável de %u bytes em %u quadros usando Selective Repeat\n", totalLen, numChunks);
+
+  while (sendBase < numChunks) {
+    bool sentSomething = false;
+    uint8_t windowEnd = min((int)(sendBase + WINDOW_SIZE), (int)numChunks);
+
+    for (uint8_t i = sendBase; i < windowEnd; i++) {
+      if (!acked[i]) {
+        unsigned long now = millis();
+        // Se nunca foi enviado ou se estourou o timeout
+        if (lastSentTime[i] == 0 || (now - lastSentTime[i] > ACK_TIMEOUT_MS)) {
+          if (attemptCount[i] >= MAX_RETRIES) {
+            Serial.printf("TX: falha definitiva no quadro DATA seq=%u após %u tentativas\n", i, MAX_RETRIES);
+            return false;
+          }
+
+          attemptCount[i]++;
+          lastSentTime[i] = now;
+
+          uint16_t offset = i * MAX_PAYLOAD;
+          uint8_t chunkSize = min((uint16_t)MAX_PAYLOAD, (uint16_t)(totalLen - offset));
+
+          // Envia o fragmento
+          sendDataFrame(i, data + offset, chunkSize, attemptCount[i]);
+
+          // Espaçamento de 500ms para permitir que o receptor processe e envie o ACK
+          listenForAcksDuring(500, acked, sendBase, numChunks);
+          sentSomething = true;
+
+          // Se a base da janela deslizou ao escutar ACKs, interrompe para recalcular a janela
+          break;
+        }
+      }
     }
 
-    offset += chunk;
+    // Se nenhum pacote da janela precisou ser enviado/retransmitido, aguarda curto período ouvindo ACKs
+    if (!sentSomething) {
+      listenForAcksDuring(100, acked, sendBase, numChunks);
+    }
   }
 
-  if (!sendStopAndWaitFrame(TYPE_END, nullptr, 0)) {
-    return false;
+  // Todos os dados confirmados. Envia o quadro END.
+  Serial.printf("TX: todos os %u quadros de dados confirmados. Enviando END.\n", numChunks);
+
+  bool endAcked = false;
+  for (uint8_t attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    sendEndFrame(numChunks, attempt);
+
+    if (waitForAck(numChunks)) {
+      endAcked = true;
+      break;
+    }
+    Serial.println("TX: timeout de ACK para END, retransmitindo...");
+    delay(40);
   }
 
-  return true;
+  return endAcked;
 }
 
 /*
