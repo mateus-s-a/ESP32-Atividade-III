@@ -269,25 +269,17 @@ void showTextOnLcd(const char *text) {
 
   size_t len = strlen(text);
 
-  // Mapeamento dinâmico de caracteres (suporte a building blocks)
-  auto printChar = [](char c) -> uint8_t {
-    if (c == '#') return 255; // Bloco totalmente aceso no LCD
-    if (c == '.') return ' '; // Espaço vazio
-    if (c >= '0' && c <= '7') return c - '0'; // Custom characters 0-7
-    return (uint8_t)c;
-  };
-
   // Linha 0 (caracteres 0 a 19)
   lcd.setCursor(0, 0);
   for (size_t i = 0; i < len && i < 20; i++) {
-    lcd.write(printChar(text[i]));
+    lcd.write(text[i]);
   }
 
   // Linha 1 (caracteres 20 a 39)
   if (len > 20) {
     lcd.setCursor(0, 1);
     for (size_t i = 20; i < len && i < 40; i++) {
-      lcd.write(printChar(text[i]));
+      lcd.write(text[i]);
     }
   }
 
@@ -295,7 +287,7 @@ void showTextOnLcd(const char *text) {
   if (len > 40) {
     lcd.setCursor(0, 2);
     for (size_t i = 40; i < len && i < 60; i++) {
-      lcd.write(printChar(text[i]));
+      lcd.write(text[i]);
     }
   }
 
@@ -303,7 +295,7 @@ void showTextOnLcd(const char *text) {
   if (len > 60) {
     lcd.setCursor(0, 3);
     for (size_t i = 60; i < len && i < 80; i++) {
-      lcd.write(printChar(text[i]));
+      lcd.write(text[i]);
     }
   }
 }
