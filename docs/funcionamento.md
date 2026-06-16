@@ -46,26 +46,12 @@ Ao energizar as placas microcontroladoras ESP32, as seguintes rotinas de hardwar
 
 Abaixo descreve-se o caminho e a transformação dos dados desde a entrada do comando do usuário até a exibição no receptor:
 
-```
-[Terminal do Usuário] ──(Texto: "Hello World")──> [ESP32 Transmissor]
-                                                         │
-                                                (Construção do Quadro
-                                                 e Cálculo do FCS)
-                                                         │
-                                                         ▼
-                                                [Antena Transmissora]
-                                                         │
-                                                  ((( Ondas de )))
-                                                  ((( Radiofreg.)))
-                                                         │
-                                                         ▼
-                                                 [Antena Receptora]
-                                                         │
-                                                (Validação do FCS
-                                                 e Reconstrução)
-                                                         │
-                                                         ▼
-                                                 [Display LCD / RX]
+```mermaid
+flowchart LR
+    A["Terminal do Usuário"] -->|Texto: 'Hello World'| B["ESP32 Transmissor"]
+    B -->|Construção do Quadro e Cálculo do FCS| C["Antena Transmissora"]
+    C -->|Ondas de Rádio 433 MHz| D["Antena Receptora"]
+    D -->|Validação do FCS e Reconstrução| E["Display LCD / RX"]
 ```
 
 ### Fase A: Processamento e Envio (Transmissor)
@@ -111,24 +97,67 @@ sequenceDiagram
     participant RX as Receptor (RX)
     participant LCD as Tela LCD (Receptor)
 
-    %% Caso de sucesso
-    Note over Usuario, TX: 1. Envio Manual de Texto
-    Usuario->>TX: Insere "Hello World" via Terminal
-    TX->>TX: Segmenta mensagem em 1 bloco (Total = 1)
+    Note over Usuario, TX: 1. Envio de Mensagem Multi-quadro
+    Usuario->>TX: Insere "Mensagem Longa" via Terminal
+    TX->>TX: Segmenta a mensagem em 2 blocos (Seq=0 e Seq=1)
+    
     TX->>Canal: Transmite DATA (Seq=0)
-    Canal->>RX: Entrega DATA (Seq=0)
+    Note over Canal: Ruído corrompe o frame (descartado pelo RX)
+    
+    TX->>Canal: Transmite DATA (Seq=1)
+    Canal->>RX: Entrega DATA (Seq=1)
     Note over RX: LCD exibe "Recebendo..."
+    RX->>RX: Valida FCS (OK) e armazena no offset 1
+    RX->>Canal: Transmite Confirmação ACK (Seq=1)
+    Canal->>TX: Entrega ACK (Seq=1)
+    
+    Note over TX: Timeout do Seq=0 estourou (Retransmissão Seletiva)
+    TX->>Canal: Retransmite apenas DATA (Seq=0)
+    Canal->>RX: Entrega DATA (Seq=0)
     RX->>RX: Valida FCS (OK) e armazena no offset 0
     RX->>Canal: Transmite Confirmação ACK (Seq=0)
     Canal->>TX: Entrega ACK (Seq=0)
-    Note over TX: Todos os blocos de dados confirmados
-
-    Note over TX, RX: 2. Encerramento da Transmissão
-    TX->>Canal: Transmite END (Seq=1)
-    Canal->>RX: Entrega END (Seq=1)
-    RX->>RX: Confirma que todos os 1 fragmentos foram recebidos
-    RX->>LCD: Imprime "Hello World" no visor físico
-    RX->>Canal: Transmite ACK (Seq=1) para o END
-    Canal->>TX: Entrega ACK (Seq=1)
-    Note over TX: Transmissão finalizada com sucesso!
+    
+    Note over TX: Todos os blocos confirmados (Seq 0 e 1)
+    TX->>Canal: Transmite END (Seq=2)
+    Canal->>RX: Entrega END (Seq=2)
+    RX->>RX: Confirma que todos os 2 fragmentos foram recebidos
+    RX->>LCD: Imprime "Mensagem Longa" no visor físico
+    RX->>Canal: Transmite ACK (Seq=2) para o END
+    Canal->>TX: Entrega ACK (Seq=2)
+    Note over TX: Envio concluído com sucesso!
 ```
+
+---
+
+## 5. Fluxo de Transmissão de Imagens Dinâmicas
+
+A transmissão de imagens dinâmicas segue o mesmo modelo de controle de fluxo e detecção de erros por Selective Repeat ARQ, adicionando etapas de conversão e processamento de dados nas extremidades da comunicação:
+
+```mermaid
+flowchart TD
+    subgraph Computador ["1. Computador de Origem"]
+        A["Imagem (100x32 pixels)"] --> B("Quantização Vetorial")
+        B --> C["Pacote Binário (Header + CGRAM + Tela)"]
+        C --> D("Codificação Hexadecimal")
+    end
+
+    subgraph Transmissor ["2. ESP32 Transmissor"]
+        E["Monitor Serial (Comando IMG:...)"] --> F["Decodificação Hexadecimal"]
+        F --> G["Fatiamento e Envio Confiável (Selective Repeat)"]
+    end
+
+    subgraph Receptor ["3. ESP32 Receptor"]
+        H["Recepção e Validação de Enlace"] --> I{"Detecta Assinatura IMG?"}
+        I -- Sim --> J["Atualiza CGRAM (Registra até 8 bitmaps)"]
+        I -- Sim --> K["Limpa e Renderiza no LCD (Mapeamento de 80 posições)"]
+    end
+
+    D --> E
+    G -->|Canal Sem Fio RF 433 MHz| H
+```
+
+1.  **Geração do Pacote (Computador):** O script `image_encoder.py` lê o arquivo de imagem, reduz a escala de pixels para $100 \times 32$ e localiza as 8 geometrias mais recorrentes. Ele compõe um cabeçalho fixo com `0x1B, 'I', 'M', 'G'`, empacota os bitmaps de 5x8 correspondentes para serem carregados na CGRAM e gera a matriz de endereçamento da tela com 80 bytes. O pacote binário completo é codificado em hexadecimal para evitar perdas de caracteres de controle ao ser enviado pelo Serial Monitor.
+2.  **Transmissão Confiável (Transmissor):** O transmissor lê a linha via monitor serial, valida o prefixo `IMG:` e realiza a conversão inversa do texto hexadecimal para bytes puros. O buffer binário resultante é fatiado em pedaços de 24 bytes e transmitido de forma confiável pelo meio físico sem fio com suporte à retransmissão seletiva.
+3.  **Processamento de Hardware (Receptor):** Ao consolidar o recebimento confiável da mensagem com a recepção do frame `END`, o receptor identifica os bytes identificadores no início do buffer. O receptor extrai a quantidade de caracteres customizados, realiza as chamadas `lcd.createChar()` para reconfigurar a memória do display de forma transparente e envia os 80 bytes do visor para desenho imediato no visor LCD.
+

@@ -35,6 +35,9 @@ O código do transmissor implementa monitoramento ativo do Serial Monitor para c
 *   **Comando `COUNT ON` (ou `CNT ON`):** Ativa o envio periódico e automático do contador a cada 3 segundos.
 *   **Comando `COUNT OFF` (ou `CNT OFF`):** Desativa o envio periódico do contador, permitindo o monitoramento limpo apenas de mensagens enviadas manualmente pelo usuário.
 
+### C. Envio de Imagens Dinâmicas
+*   **Comando `IMG:<hex_data>`:** Decodifica a representação textual hexadecimal em um pacote binário estruturado contendo a assinatura de controle, definição dinâmica de bitmaps para a CGRAM e o mapeamento de pixels da tela. Esse pacote é enviado de forma confiável ao receptor.
+
 ---
 
 ## 5. Logs de Execução Demonstrativos
@@ -97,3 +100,23 @@ RX: ACK enviado para seq=0
 RX: mensagem completa reconstruida:
 Transmissao Confiável RF
 ```
+
+---
+
+## 6. Utilização do Codificador de Imagens (Python)
+
+Para converter qualquer imagem em comandos hexadecimais compatíveis com a renderização dinâmica do LCD:
+
+1. Certifique-se de que a biblioteca Pillow está instalada no seu ambiente:
+   ```bash
+   pip install Pillow
+   ```
+2. Execute o script informando o caminho do arquivo de imagem e, opcionalmente, parâmetros adicionais de threshold ou inversão de cor:
+   ```bash
+   python3 scripts/image_encoder.py images/5968851.png
+   ```
+3. O script exibirá as pré-visualizações original e reconstruída no terminal, seguidas pela linha de comando gerada:
+   ```text
+   IMG:1b494d47081f1f1...
+   ```
+4. Copie o comando completo exibido e cole-o no Serial Monitor do transmissor com o fim de linha configurado como **Newline** (Nova Linha).

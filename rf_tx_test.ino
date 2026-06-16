@@ -544,6 +544,47 @@ void handleSerialCommands() {
     return;
   }
 
+  if (line.startsWith("IMG:")) {
+    String hexData = line.substring(4);
+    hexData.trim();
+    size_t hexLen = hexData.length();
+    if (hexLen % 2 != 0) {
+      Serial.println("TX: Erro - String hexadecimal invalida (comprimento impar)");
+      return;
+    }
+
+    size_t binLen = hexLen / 2;
+    uint8_t *binBuf = (uint8_t *)malloc(binLen);
+    if (!binBuf) {
+      Serial.println("TX: Erro - Falha ao alocar memoria para imagem");
+      return;
+    }
+
+    auto hexCharToVal = [](char c) -> uint8_t {
+      if (c >= '0' && c <= '9') return c - '0';
+      if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+      if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+      return 0;
+    };
+
+    for (size_t i = 0; i < binLen; i++) {
+      char c1 = hexData.charAt(2 * i);
+      char c2 = hexData.charAt(2 * i + 1);
+      binBuf[i] = (hexCharToVal(c1) << 4) | hexCharToVal(c2);
+    }
+
+    Serial.printf("TX: iniciando envio confiavel de imagem binaria (%u bytes)\n", binLen);
+    bool ok = sendBufferReliable(binBuf, binLen);
+    free(binBuf);
+
+    if (ok) {
+      Serial.println("TX: imagem enviada com sucesso");
+    } else {
+      Serial.println("TX: falha ao enviar imagem");
+    }
+    return;
+  }
+
   sendTextMessage(line);
 }
 

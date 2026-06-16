@@ -269,17 +269,25 @@ void showTextOnLcd(const char *text) {
 
   size_t len = strlen(text);
 
+  // Mapeamento dinâmico de caracteres (suporte a building blocks)
+  auto printChar = [](char c) -> uint8_t {
+    if (c == '#') return 255; // Bloco totalmente aceso no LCD
+    if (c == '.') return ' '; // Espaço vazio
+    if (c >= '0' && c <= '7') return c - '0'; // Custom characters 0-7
+    return (uint8_t)c;
+  };
+
   // Linha 0 (caracteres 0 a 19)
   lcd.setCursor(0, 0);
   for (size_t i = 0; i < len && i < 20; i++) {
-    lcd.write(text[i]);
+    lcd.write(printChar(text[i]));
   }
 
   // Linha 1 (caracteres 20 a 39)
   if (len > 20) {
     lcd.setCursor(0, 1);
     for (size_t i = 20; i < len && i < 40; i++) {
-      lcd.write(text[i]);
+      lcd.write(printChar(text[i]));
     }
   }
 
@@ -287,7 +295,7 @@ void showTextOnLcd(const char *text) {
   if (len > 40) {
     lcd.setCursor(0, 2);
     for (size_t i = 40; i < len && i < 60; i++) {
-      lcd.write(text[i]);
+      lcd.write(printChar(text[i]));
     }
   }
 
@@ -295,7 +303,7 @@ void showTextOnLcd(const char *text) {
   if (len > 60) {
     lcd.setCursor(0, 3);
     for (size_t i = 60; i < len && i < 80; i++) {
-      lcd.write(text[i]);
+      lcd.write(printChar(text[i]));
     }
   }
 }
@@ -310,6 +318,68 @@ void showTextOnLcd(const char *text) {
  * mensagem.
  */
 void onCompleteMessage() {
+  // Verifica se é um pacote de imagem dinâmica
+  if (rxMessageLen >= 4 && rxMessage[0] == 0x1B && rxMessage[1] == 'I' && rxMessage[2] == 'M' && rxMessage[3] == 'G') {
+    Serial.println("RX: pacote de imagem dinâmica detectado. Carregando CGRAM...");
+
+    uint8_t numCustom = rxMessage[4];
+    size_t headerSize = 5 + 8 * numCustom;
+
+    if (rxMessageLen < headerSize + 80) {
+      Serial.printf("RX: Erro - Tamanho do pacote de imagem inválido (recebido %u bytes, esperado %u)\n", rxMessageLen, headerSize + 80);
+      clearAssemblyBuffer();
+      return;
+    }
+
+    // Define os caracteres customizados dinamicamente na CGRAM
+    for (uint8_t i = 0; i < numCustom && i < 8; i++) {
+      uint8_t bitmap[8];
+      memcpy(bitmap, rxMessage + 5 + i * 8, 8);
+      lcd.createChar(i, bitmap);
+    }
+
+    // Exibe a imagem no LCD usando os novos caracteres
+    lcd.clear();
+
+    // Mapeamento de pixels para a imagem dinâmica
+    auto printChar = [](char c) -> uint8_t {
+      if (c == '#') return 255; // Bloco totalmente aceso
+      if (c == '.') return ' '; // Espaço vazio
+      if (c >= '0' && c <= '7') return c - '0'; // Caractere customizado correspondente
+      return (uint8_t)c;
+    };
+
+    const uint8_t *screenData = rxMessage + headerSize;
+
+    // Linha 0 (0-19)
+    lcd.setCursor(0, 0);
+    for (size_t i = 0; i < 20; i++) {
+      lcd.write(printChar(screenData[i]));
+    }
+
+    // Linha 1 (20-39)
+    lcd.setCursor(0, 1);
+    for (size_t i = 20; i < 40; i++) {
+      lcd.write(printChar(screenData[i]));
+    }
+
+    // Linha 2 (40-59)
+    lcd.setCursor(0, 2);
+    for (size_t i = 40; i < 60; i++) {
+      lcd.write(printChar(screenData[i]));
+    }
+
+    // Linha 3 (60-79)
+    lcd.setCursor(0, 3);
+    for (size_t i = 60; i < 80; i++) {
+      lcd.write(printChar(screenData[i]));
+    }
+
+    Serial.println("RX: Imagem dinâmica renderizada no LCD com sucesso!");
+    clearAssemblyBuffer();
+    return;
+  }
+
   char text[RX_MESSAGE_BUFFER_SIZE + 1];
   memcpy(text, rxMessage, rxMessageLen);
   text[rxMessageLen] = '\0';
@@ -440,6 +510,26 @@ void setup() {
   Wire.begin(21, 22);
   lcd.init();
   lcd.backlight();
+
+  // Definição dos 8 caracteres customizados (building blocks para curvas, colunas e linhas)
+  uint8_t cc0[8] = { 0b00111, 0b01111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111 }; // 0: Top-Left Corner
+  uint8_t cc1[8] = { 0b11100, 0b11110, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111 }; // 1: Top-Right Corner
+  uint8_t cc2[8] = { 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b01111, 0b00111 }; // 2: Bottom-Left Corner
+  uint8_t cc3[8] = { 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11110, 0b11100 }; // 3: Bottom-Right Corner
+  uint8_t cc4[8] = { 0b11100, 0b11100, 0b11100, 0b11100, 0b11100, 0b11100, 0b11100, 0b11100 }; // 4: Left Column
+  uint8_t cc5[8] = { 0b00111, 0b00111, 0b00111, 0b00111, 0b00111, 0b00111, 0b00111, 0b00111 }; // 5: Right Column
+  uint8_t cc6[8] = { 0b11111, 0b11111, 0b11111, 0b11111, 0b00000, 0b00000, 0b00000, 0b00000 }; // 6: Top Row
+  uint8_t cc7[8] = { 0b00000, 0b00000, 0b00000, 0b00000, 0b11111, 0b11111, 0b11111, 0b11111 }; // 7: Bottom Row
+
+  lcd.createChar(0, cc0);
+  lcd.createChar(1, cc1);
+  lcd.createChar(2, cc2);
+  lcd.createChar(3, cc3);
+  lcd.createChar(4, cc4);
+  lcd.createChar(5, cc5);
+  lcd.createChar(6, cc6);
+  lcd.createChar(7, cc7);
+
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("RX pronto");
