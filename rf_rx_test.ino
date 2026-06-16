@@ -281,13 +281,86 @@ void showTextOnLcd(const char* text) {
 }
 
 /*
+ * Função: renderAsciiArt
+ * Objetivo: Renderiza uma imagem ASCII de 20x4 diretamente no visor do LCD.
+ * Parâmetros:
+ *   - artData: Ponteiro para os 80 bytes de caracteres da imagem.
+ */
+void renderAsciiArt(const uint8_t* artData) {
+  lcd.clear();
+  for (uint8_t row = 0; row < 4; row++) {
+    lcd.setCursor(0, row);
+    for (uint8_t col = 0; col < 20; col++) {
+      lcd.write(artData[row * 20 + col]);
+    }
+  }
+}
+
+/*
  * Função: onCompleteMessage
- * Objetivo: Processa e exibe a mensagem de texto completa quando todos os pedaços foram recebidos.
+ * Objetivo: Processa e exibe a mensagem de texto completa ou reconstrói/renderiza as imagens.
  * Funcionamento: É acionada após a recepção bem-sucedida do END e confirmação de todos os fragmentos.
- * Adiciona o caractere nulo ('\0') para formar uma String válida, exibe-a no Serial Monitor,
- * no display LCD I2C e, em seguida, limpa o buffer para a próxima mensagem.
+ * Verifica os prefixos de dados para decidir o tipo de exibição (ASCII, GLYPH, BIN/HEX ou Texto Comum).
  */
 void onCompleteMessage() {
+  // 1. Verifica se a mensagem é do tipo ASCII Art (20x4)
+  if (rxMessageLen >= 91 && memcmp(rxMessage, "[IMG:ASCII]", 11) == 0) {
+    Serial.println("RX: Imagem ASCII Art recebida");
+    renderAsciiArt(rxMessage + 11);
+    clearAssemblyBuffer();
+    return;
+  }
+
+  // 2. Verifica se a mensagem contém um caractere customizado (Custom Glyph)
+  if (rxMessageLen >= 20 && memcmp(rxMessage, "[IMG:GLYPH]", 11) == 0) {
+    uint8_t slot = rxMessage[11];
+    uint8_t pattern[8];
+    memcpy(pattern, rxMessage + 12, 8);
+
+    // Registra o novo caractere customizado no LCD
+    lcd.createChar(slot, pattern);
+
+    Serial.printf("RX: Caractere customizado (slot=%u) registrado com sucesso!\n", slot);
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Glyph Recebido!");
+    lcd.setCursor(0, 1);
+    lcd.printf("Slot LCD: %u", slot);
+    lcd.setCursor(0, 2);
+    lcd.print("Render: ");
+    lcd.write(slot);
+
+    clearAssemblyBuffer();
+    return;
+  }
+
+  // 3. Verifica se a mensagem contém dados de uma imagem binária real
+  if (rxMessageLen >= 9 && memcmp(rxMessage, "[IMG:BIN]", 9) == 0) {
+    size_t dataLen = rxMessageLen - 9;
+
+    Serial.println("RX: Imagem binaria reconstruida. Dados em hexadecimal para conversao no PC:");
+    Serial.print("[IMG:HEX]");
+    for (size_t i = 0; i < dataLen; i++) {
+      Serial.printf("%02X", rxMessage[9 + i]);
+    }
+    Serial.println();
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Imagem Recebida!");
+    lcd.setCursor(0, 1);
+    lcd.printf("Tam: %u bytes", dataLen);
+    lcd.setCursor(0, 2);
+    lcd.print("Reconstrua no PC");
+    lcd.setCursor(0, 3);
+    lcd.print("usando o Hex");
+
+    clearAssemblyBuffer();
+    return;
+  }
+
+  // 4. Caso padrão: Mensagem de texto simples
   char text[RX_MESSAGE_BUFFER_SIZE + 1];
   memcpy(text, rxMessage, rxMessageLen);
   text[rxMessageLen] = '\0';
@@ -305,8 +378,8 @@ void onCompleteMessage() {
  * Função: processValidFrame
  * Objetivo: Processa um quadro já decodificado e validado aplicando a lógica do Selective Repeat ARQ.
  * Funcionamento: Analisa o tipo do quadro:
- *   - Se for DATA: Se for o primeiro bloco de uma nova mensagem, atualiza o LCD para "Recebendo...".
- *     Grava o payload na posição correspondente ('seq * MAX_PAYLOAD'), marca o bloco como recebido e envia o ACK para 'seq'.
+ *   - Se for DATA: Grava o payload na posição correspondente ('seq * MAX_PAYLOAD'), 
+ *     marca o bloco como recebido, atualiza o progresso de blocos no LCD e envia o ACK para 'seq'.
  *   - Se for END: Armazena o total de blocos esperados (que vem no campo 'seq'). Verifica se todos os fragmentos
  *     de 0 a N-1 foram recebidos. Se estiver completo, envia o ACK para 'N', calcula o tamanho total e reconstrói a mensagem.
  *     Se incompleto, não envia o ACK para que o transmissor retransmita.
@@ -316,21 +389,6 @@ void onCompleteMessage() {
 void processValidFrame(const DecodedFrame& frame) {
   if (frame.type == TYPE_DATA) {
     uint8_t seq = frame.seq;
-
-    // Se for o primeiro fragmento recebido de uma nova mensagem, limpa a tela e mostra status
-    bool anyReceived = false;
-    for (int i = 0; i < 256; i++) {
-      if (chunkReceived[i]) {
-        anyReceived = true;
-        break;
-      }
-    }
-
-    if (!anyReceived) {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Recebendo...");
-    }
 
     if (seq < 256) {
       if (!chunkReceived[seq]) {
@@ -344,6 +402,21 @@ void processValidFrame(const DecodedFrame& frame) {
       } else {
         Serial.printf("RX: DATA duplicado seq=%u recebido novamente\n", seq);
       }
+
+      // Conta o progresso dos blocos recebidos até o momento
+      uint8_t count = 0;
+      for (int i = 0; i < 256; i++) {
+        if (chunkReceived[i]) {
+          count++;
+        }
+      }
+
+      // Atualiza o visor com o progresso de recebimento
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Recebendo...");
+      lcd.setCursor(0, 1);
+      lcd.printf("Blocos: %u", count);
 
       // Envia o ACK correspondente ao fragmento recebido
       sendAck(seq);
